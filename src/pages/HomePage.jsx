@@ -9,6 +9,10 @@ const HomePage = () => {
     navigate("/galeria", { replace: true });
   };
 
+  const handleColors = () => {
+    navigate("/colores", { replace: true });
+  };
+
   const handleLogout = async () => {
     await signOut(auth);
     navigate("/login", { replace: true });
@@ -27,8 +31,27 @@ const HomePage = () => {
           >
             Ir a la Galería
           </button>
-          <button>
-            
+          <button
+            onClick={handleColors}
+            className="w-full py-2.5 bg-[#6b5a4e] hover:bg-[#5a4a3e] text-[#f0ebe4] text-sm font-medium rounded-xl transition cursor-pointer"
+          >
+            Colores
+          </button>
+          <button
+            onClick={() => {
+              navigate("/galeria-arte", { replace: true });
+            }}
+            className="w-full py-2.5 bg-[#6b5a4e] hover:bg-[#5a4a3e] text-[#f0ebe4] text-sm font-medium rounded-xl transition cursor-pointer"
+          >
+            Galería de Arte
+          </button>
+          <button
+            onClick={() => {
+              navigate("/sistema-solar", { replace: true });
+            }}
+            className="w-full py-2.5 bg-[#6b5a4e] hover:bg-[#5a4a3e] text-[#f0ebe4] text-sm font-medium rounded-xl transition cursor-pointer"
+          >
+            Sistema Solar
           </button>
           <button
             onClick={handleLogout}

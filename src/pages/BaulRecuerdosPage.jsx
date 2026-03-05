@@ -4,10 +4,10 @@ import { FiLogOut, FiMoreVertical } from "react-icons/fi";
 import {
   RiApps2Line,
   RiCheckboxMultipleLine,
-  RiDownloadLine,
-  RiDownloadCloud2Line,
   RiDashboardLine,
   RiDeleteBinLine,
+  RiDownloadCloud2Line,
+  RiDownloadLine,
   RiImageLine,
   RiLayoutGridLine,
   RiListCheck2,
@@ -581,7 +581,7 @@ function BaulRecuerdosPage() {
                   <FiMoreVertical size={17} />
                 </button>
                 {showMenu && (
-                  <div className="absolute right-0 top-full mt-1 w-44 bg-[#ede5d8] border border-[#b0a898] rounded-2xl shadow-lg overflow-hidden z-50">
+                  <div className="absolute right-0 top-full mt-1 w-44 bg-[#ede5d8] border border-[#b0a898] rounded-2xl shadow-lg overflow-hidden z-50 max-[407px]:left-0 max-[407px]:right-auto max-[407px]:origin-top-left">
                     <button
                       onClick={() => {
                         setShowMenu(false);

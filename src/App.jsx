@@ -7,9 +7,12 @@ import {
 import Carga from "./components/Carga";
 import useCarga from "./hooks/useCarga";
 import GaleriaPage from "./pages/BaulRecuerdosPage";
+import ColoresPage from "./pages/ColoresPage";
 import HomePage from "./pages/HomePage";
 import LoginPage from "./pages/LoginPage";
 import PrivateRoute from "./routes/PrivateRoute";
+import SistemaSolar from "./pages/SistemaSolar";
+import MusicPlayer from "./pages/LibroAmor";
 
 const App = () => {
   const loading = useCarga(1500);
@@ -23,6 +26,9 @@ const App = () => {
         <Route path="/login" element={<LoginPage />} />
         <Route element={<PrivateRoute />}>
           <Route path="/" element={<HomePage />} />
+          <Route path="/colores" element={<ColoresPage />} />
+          <Route path="/music-player" element={<MusicPlayer />} />
+          <Route path="/sistema-solar" element={<SistemaSolar />} />
           <Route path="/galeria" element={<GaleriaPage />} />
         </Route>
       </Routes>
