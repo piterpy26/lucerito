@@ -1,13 +1,14 @@
 [
   {
-    "origin": ["http://localhost:5173", "http://localhost:3000"],
+    "origin": ["http://localhost:5173", "http://localhost:3000", "https://lucerito.vercel.app"],
     "method": ["GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS"],
     "maxAgeSeconds": 3600,
     "responseHeader": [
       "Content-Type",
       "Access-Control-Allow-Origin",
       "Authorization",
-      "x-goog-resumable"
+      "x-goog-resumable",
+      "Content-Disposition"
     ]
   }
 ]
