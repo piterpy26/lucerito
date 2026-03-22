@@ -5,9 +5,7 @@ import { memo, useCallback, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import * as THREE from "three";
 
-// ─────────────────────────────────────────────
-// DATA (fuera del componente → no recrea en renders)
-// ─────────────────────────────────────────────
+
 const PLANETS_DATA = [
   {
     key: "mercurio",

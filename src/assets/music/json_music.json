@@ -1,0 +1,38 @@
+[
+  {
+    "id": 1,
+    "title": "Tu Recuerdo",
+    "artist": "Danny Style",
+    "src": "/src/assets/music/Danny style- Tu Recuerdo.mp3",
+    "cover": ""
+  },
+  {
+    "id": 2,
+    "title": "He Llorado (Como Un Niño)",
+    "artist": "Juan Magan ft. Gente De Zona",
+    "src": "/src/assets/music/Juan Magan - He Llorado (Como Un Niño) ft. Gente De Zona (Video Oficial).mp3",
+    "cover": ""
+  },
+  {
+    "id": 3,
+    "title": "Déjate Llevar",
+    "artist": "Juan Magan, Belinda, Manuel Turizo, Snova, B-Case",
+    "src": "/src/assets/music/Juan Magan, Belinda, Manuel Turizo, Snova, B-Case - Déjate Llevar  (Video Oficial).mp3",
+    "cover": ""
+  },
+  {
+    "id": 4,
+    "title": "Amapolas Remix",
+    "artist": "Leo Rizzi, Danny Ocean",
+    "src": "/src/assets/music/Leo Rizzi, Danny Ocean - Amapolas Remix (Videoclip Oficial).mp3",
+    "cover": ""
+  },
+  {
+    "id": 5,
+    "title": "miau",
+    "artist": "Young Cister",
+    "src": "/src/assets/music/Young Cister - miau (Video Oficial).mp3",
+    "cover": ""
+  }
+
+]

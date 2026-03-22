@@ -39,11 +39,11 @@ const HomePage = () => {
           </button>
           <button
             onClick={() => {
-              navigate("/galeria-arte", { replace: true });
+              navigate("/musica", { replace: true });
             }}
             className="w-full py-2.5 bg-[#6b5a4e] hover:bg-[#5a4a3e] text-[#f0ebe4] text-sm font-medium rounded-xl transition cursor-pointer"
           >
-            Galería de Arte
+            Música
           </button>
           <button
             onClick={() => {
