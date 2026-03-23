@@ -1,4 +1,4 @@
-import useDownloader from "react-use-downloader";
+// src/pages/BaulRecuerdosPage.jsx
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FaBox } from "react-icons/fa";
 import { FiLogOut, FiMoreVertical } from "react-icons/fi";
@@ -12,10 +12,10 @@ import {
   RiImageLine,
   RiLayoutGridLine,
   RiListCheck2,
-  RiUploadCloud2Line,
-  RiVideoLine,
   RiLinksLine,
   RiShareForwardLine,
+  RiUploadCloud2Line,
+  RiVideoLine,
 } from "react-icons/ri";
 import { useNavigate } from "react-router-dom";
 import Swal from "sweetalert2";
@@ -87,32 +87,29 @@ function writeCache(data) {
 // ── Utils ─────────────────────────────────────────────────────────────────────
 const isImage = (type) => type?.startsWith("image");
 
-// Con HTTPS navigator.clipboard funciona en todos los browsers modernos
 async function copyToClipboard(text) {
   try {
     await navigator.clipboard.writeText(text);
     return true;
+  } catch {}
+  try {
+    const el = Object.assign(document.createElement("textarea"), {
+      value: text,
+      readOnly: true,
+      style: "position:fixed;opacity:0;pointer-events:none",
+    });
+    document.body.appendChild(el);
+    el.focus();
+    el.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(el);
+    return ok;
   } catch {
-    // Fallback execCommand para WebViews antiguos
-    try {
-      const el = Object.assign(document.createElement("textarea"), {
-        value: text,
-        readOnly: true,
-        style: "position:fixed;opacity:0;pointer-events:none",
-      });
-      document.body.appendChild(el);
-      el.focus();
-      el.select();
-      const ok = document.execCommand("copy");
-      document.body.removeChild(el);
-      return ok;
-    } catch {
-      return false;
-    }
+    return false;
   }
 }
 
-// ── Helpers de upload ─────────────────────────────────────────────────────────
+// ── Helpers upload ────────────────────────────────────────────────────────────
 async function confirmDuplicates(files, items) {
   const existingNames = new Set(
     items.map((i) => i.name?.toLowerCase().trim()).filter(Boolean),
@@ -496,9 +493,9 @@ function BaulRecuerdosPage() {
   const inputRef = useRef(null);
   const actionsRef = useRef(null);
   const menuRef = useRef(null);
-  const lbRef = useRef({}); // bridge handlers → botones del Lightbox
+  const lbRef = useRef({});
+  const abortRef = useRef(null); // AbortController activo de descarga
 
-  const { download, percentage, isInProgress, cancel } = useDownloader();
   const [items, setItems] = useState([]);
   const [filter, setFilter] = useState("all");
   const [view, setView] = useState("grid");
@@ -514,40 +511,7 @@ function BaulRecuerdosPage() {
 
   const isDeleting = deleteState.done < deleteState.total;
 
-  useEffect(() => {
-    if (isInProgress) {
-      Swal.fire({
-        ...swalBase,
-        title: "Descargando…",
-        html: `<div style="font-size:13px;color:#6b5a4e">Preparando archivo, por favor espera.</div>
-             <div id="swal-dl-bar" style="margin-top:10px;height:6px;border-radius:999px;background:#d8cfc5;overflow:hidden">
-               <div id="swal-dl-fill" style="height:100%;width:0%;background:#6b5a4e;border-radius:999px;transition:width .2s"></div>
-             </div>
-             <div id="swal-dl-pct" style="margin-top:6px;font-size:12px;font-weight:700;color:#3a2a1c">0%</div>`,
-        allowOutsideClick: false,
-        showConfirmButton: false,
-        showCancelButton: true,
-        cancelButtonText: "Cancelar",
-        cancelButtonColor: "#c0392b",
-        didOpen: () => Swal.showLoading(),
-      }).then((result) => {
-        if (result.dismiss === Swal.DismissReason.cancel) cancel();
-      });
-    } else {
-      if (Swal.isVisible()) Swal.close();
-    }
-  }, [isInProgress]); // solo se dispara al iniciar/terminar — no en cada %
-
-  // Actualiza la barra interna sin reabrir el Swal
-  useEffect(() => {
-    if (!isInProgress) return;
-    const pct = Math.round(percentage);
-    const fill = document.getElementById("swal-dl-fill");
-    const text = document.getElementById("swal-dl-pct");
-    if (fill) fill.style.width = `${pct}%`;
-    if (text) text.textContent = `${pct}%`;
-  }, [percentage, isInProgress]);
-
+  // ── Efectos de inicialización ─────────────────────────────────────────────
   useEffect(() => {
     const handle = (e) => {
       if (actionsRef.current && !actionsRef.current.contains(e.target))
@@ -613,16 +577,96 @@ function BaulRecuerdosPage() {
     [items],
   );
 
-  // ── Descarga con react-use-downloader ─────────────────────────────────────
-  // Con HTTPS funciona en todos los navegadores incluyendo iOS Safari
-  const triggerDownload = useCallback(
-    async (url, name) => {
-      await download(url, name);
-    },
-    [download],
-  );
+  // ── triggerDownload — fetch con AbortController + Swal ───────────────────
+  const triggerDownload = useCallback(async (url, name) => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    let cancelled = false;
 
-  // ── Handlers del Lightbox (operan sobre la URL ya cargada) ────────────────
+    Swal.fire({
+      ...swalBase,
+      title: "Descargando…",
+      html: `<div style="font-size:13px;color:#6b5a4e">Preparando archivo, espera un momento.</div>
+             <div style="margin-top:10px;height:6px;border-radius:999px;background:#d8cfc5;overflow:hidden">
+               <div id="swal-dl-fill" style="height:100%;width:0%;background:#6b5a4e;border-radius:999px;transition:width .15s"></div>
+             </div>
+             <div id="swal-dl-pct" style="margin-top:6px;font-size:12px;font-weight:700;color:#3a2a1c">0%</div>`,
+      allowOutsideClick: false,
+      showConfirmButton: false,
+      showCancelButton: true,
+      cancelButtonText: "Cancelar",
+      cancelButtonColor: "#c0392b",
+    }).then((r) => {
+      if (r.dismiss === Swal.DismissReason.cancel) {
+        cancelled = true;
+        controller.abort();
+      }
+    });
+
+    try {
+      const res = await fetch(url, { signal: controller.signal });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const total =
+        parseInt(res.headers.get("content-length") ?? "0", 10) || null;
+      const reader = res.body.getReader();
+      const chunks = [];
+      let received = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (cancelled || controller.signal.aborted) {
+          await reader.cancel();
+          return;
+        }
+
+        chunks.push(value);
+        received += value.length;
+
+        if (total) {
+          const pct = Math.round((received / total) * 100);
+          const fill = document.getElementById("swal-dl-fill");
+          const text = document.getElementById("swal-dl-pct");
+          if (fill) fill.style.width = `${pct}%`;
+          if (text) text.textContent = `${pct}%`;
+        }
+      }
+
+      if (cancelled || controller.signal.aborted) return;
+
+      const blob = new Blob(chunks);
+      const blobUrl = URL.createObjectURL(blob);
+      const a = Object.assign(document.createElement("a"), {
+        href: blobUrl,
+        download: name,
+      });
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 10_000);
+      Swal.close();
+    } catch (err) {
+      if (err?.name === "AbortError") {
+        Swal.fire({
+          ...swalBase,
+          title: "Descarga cancelada",
+          icon: "info",
+          timer: 1500,
+          showConfirmButton: false,
+        });
+      } else {
+        Swal.fire({
+          ...swalBase,
+          title: "Error al descargar",
+          text: "Intenta de nuevo.",
+          icon: "error",
+          confirmButtonText: "Entendido",
+        });
+      }
+    }
+  }, []);
+
+  // ── Handlers Lightbox ─────────────────────────────────────────────────────
   const handleLightboxCopy = useCallback(async (url) => {
     const ok = await copyToClipboard(url);
     Swal.fire({
@@ -637,41 +681,49 @@ function BaulRecuerdosPage() {
 
   const handleLightboxShare = useCallback(async (url, name) => {
     try {
+      if (navigator.canShare) {
+        try {
+          const res = await fetch(url);
+          const blob = await res.blob();
+          const ext = blob.type.split("/")[1] ?? "jpg";
+          const safeName = name.includes(".") ? name : `${name}.${ext}`;
+          const file = new File([blob], safeName, { type: blob.type });
+          if (navigator.canShare({ files: [file] })) {
+            await navigator.share({ files: [file], title: safeName });
+            return;
+          }
+        } catch (e) {
+          if (e?.name === "AbortError") return;
+          if (import.meta.env.DEV) console.warn("share blob:", e);
+        }
+      }
       if (navigator.share) {
         await navigator.share({ title: name, url });
-      } else {
-        const ok = await copyToClipboard(url);
-        Swal.fire({
-          ...swalBase,
-          title: ok ? "Enlace copiado 🔗" : "No se pudo compartir",
-          text: ok
-            ? "Tu navegador no soporta compartir. Se copió el enlace."
-            : undefined,
-          icon: ok ? "success" : "error",
-          timer: ok ? 2000 : undefined,
-          showConfirmButton: !ok,
-          confirmButtonText: "Entendido",
-        });
+        return;
       }
+      const ok = await copyToClipboard(url);
+      Swal.fire({
+        ...swalBase,
+        title: ok ? "Enlace copiado 🔗" : "No se pudo compartir",
+        text: ok
+          ? "Tu navegador no soporta compartir. Se copió el enlace."
+          : undefined,
+        icon: ok ? "success" : "error",
+        timer: ok ? 2000 : undefined,
+        showConfirmButton: !ok,
+        confirmButtonText: "Entendido",
+      });
     } catch (err) {
       if (err?.name !== "AbortError" && import.meta.env.DEV)
         console.warn("lightboxShare:", err);
     }
   }, []);
 
-  const handleLightboxDownload = useCallback(
-    (url, name) => {
-      triggerDownload(url, name);
-    },
-    [triggerDownload],
-  );
-
-  // Siempre la versión más fresca — los botones del Lightbox capturan lbRef
+  // lbRef bridge — siempre versión fresca sin recrear los botones del Lightbox
   lbRef.current.copy = handleLightboxCopy;
   lbRef.current.share = handleLightboxShare;
-  lbRef.current.download = handleLightboxDownload;
+  lbRef.current.download = (url, name) => triggerDownload(url, name);
 
-  // Botones creados UNA sola vez con useState — acceden a lbRef sin recrearse
   const [LightboxCopyBtn] = useState(() =>
     memo(function LightboxCopyBtn() {
       const { currentSlide } = useLightboxState();
@@ -758,11 +810,8 @@ function BaulRecuerdosPage() {
     }
   }, []);
 
-  // react-use-downloader — funciona con HTTPS en todos los navegadores
   const handleDownloadOne = useCallback(
-    (item) => {
-      triggerDownload(item.url, item.name ?? "archivo");
-    },
+    (item) => triggerDownload(item.url, item.name ?? "archivo"),
     [triggerDownload],
   );
 
@@ -771,12 +820,9 @@ function BaulRecuerdosPage() {
     setShowActions(false);
     const toDownload = items.filter((i) => selected.has(i.id));
     if (IS_MOBILE) {
-      // Mobile: descarga uno a uno con react-use-downloader
-      for (const item of toDownload) {
+      for (const item of toDownload)
         await triggerDownload(item.url, item.name ?? "archivo");
-      }
     } else {
-      // Desktop: ZIP
       downloadAllAsZip(toDownload);
     }
   }, [selected, items, triggerDownload]);
@@ -1029,8 +1075,6 @@ function BaulRecuerdosPage() {
           counts={counts}
           onSelect={handleFilterSelect}
         />
-
-        {/* Barras de progreso */}
         <UploadProgress state={uploadState} />
         <DeleteProgress state={deleteState} />
 
@@ -1041,7 +1085,6 @@ function BaulRecuerdosPage() {
               El baúl está esperando nuestros recuerdos 📭
             </p>
           )}
-
           {filtered.length > 0 && view === "compact" && (
             <div className="baul-compact mt-2">
               {filtered.map((item, i) => (
@@ -1060,7 +1103,6 @@ function BaulRecuerdosPage() {
               ))}
             </div>
           )}
-
           {filtered.length > 0 && view === "grid" && (
             <div className="baul-grid">
               {filtered.map((item, i) => (
@@ -1079,7 +1121,6 @@ function BaulRecuerdosPage() {
               ))}
             </div>
           )}
-
           {filtered.length > 0 && view === "list" && (
             <div className="flex flex-col gap-2">
               {filtered.map((item, i) => (
@@ -1104,7 +1145,6 @@ function BaulRecuerdosPage() {
         </div>
       </div>
 
-      {/* ── Lightbox con toolbar cross-platform ── */}
       <Lightbox
         open={lightboxIdx >= 0}
         index={lightboxIdx}
