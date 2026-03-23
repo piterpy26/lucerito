@@ -1,5 +1,6 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { deleteSong, fetchSongs, updateSong, uploadSong } from "../firebase/musicService";
 import {
   RiAddLine,
   RiArrowDownSLine,
@@ -19,11 +20,12 @@ import {
   RiSunLine,
   RiVolumeDownLine,
   RiVolumeUpLine,
+  RiPencilLine
 } from "react-icons/ri";
 import { useNavigate } from "react-router-dom";
 import Swal from "sweetalert2";
 import Carga from "../components/Carga";
-import { deleteSong, fetchSongs, uploadSong } from "../firebase/musicService";
+
 
 // ── Temas ─────────────────────────────────────────────────────────────────────
 const themes = {
@@ -199,7 +201,7 @@ const SearchBar = memo(function SearchBar({ value, onChange, theme }) {
   );
 });
 
-const SongRow = memo(function SongRow({ song, isActive, playing, isFav, onPlay, onToggleFav, onDelete, theme }) {
+const SongRow = memo(function SongRow({ song, isActive, playing, isFav, onPlay, onToggleFav, onEdit, onDelete, theme }) {
   return (
     <div role="button" tabIndex={0}
       onClick={onPlay} onKeyDown={(e) => e.key === "Enter" && onPlay()}
@@ -217,6 +219,13 @@ const SongRow = memo(function SongRow({ song, isActive, playing, isFav, onPlay, 
           className="w-9 h-9 rounded-full flex items-center justify-center border-none bg-transparent cursor-pointer">
           {isFav ? <RiHeart3Fill size={20} style={{ color: theme.light }} /> : <RiHeart3Line size={20} style={{ color: theme.accent }} />}
         </motion.button>
+        {onEdit && (
+  <motion.button whileTap={{ scale: 0.9 }} type="button"
+    onClick={(e) => { e.stopPropagation(); onEdit(song); }}
+    className="w-9 h-9 rounded-full flex items-center justify-center border-none bg-transparent cursor-pointer">
+    <RiPencilLine size={17} style={{ color: theme.muted }} />
+  </motion.button>
+)}
         {onDelete && (
           <motion.button whileTap={{ scale: 0.9 }} type="button"
             onClick={(e) => { e.stopPropagation(); onDelete(song); }}
@@ -500,6 +509,64 @@ function Reproductor() {
     }
   }, [songs]);
 
+  const handleEditSong = useCallback(async (s) => {
+  const { value: formData } = await Swal.fire({
+    ...swalBase,
+    title: "Editar canción",
+    html: `
+      <div style="display:flex;flex-direction:column;gap:10px;text-align:left">
+        <div>
+          <label style="font-size:11px;font-weight:600;color:#6b5a4e;display:block;margin-bottom:3px">Título *</label>
+          <input id="swal-title" class="swal2-input" value="${s.title}" style="margin:0;width:100%;box-sizing:border-box" />
+        </div>
+        <div>
+          <label style="font-size:11px;font-weight:600;color:#6b5a4e;display:block;margin-bottom:3px">Artista *</label>
+          <input id="swal-artist" class="swal2-input" value="${s.artist}" style="margin:0;width:100%;box-sizing:border-box" />
+        </div>
+        <div>
+          <label style="font-size:11px;font-weight:600;color:#6b5a4e;display:block;margin-bottom:3px">Nueva portada (opcional)</label>
+          <input id="swal-cover" type="file" accept="image/*" class="swal2-input" style="margin:0;width:100%;box-sizing:border-box;padding:6px;height:auto" />
+        </div>
+        ${s.cover ? `<img src="${s.cover}" style="width:60px;height:60px;border-radius:50%;object-fit:cover;align-self:center;border:2px solid #6b5a4e" />` : ""}
+      </div>`,
+    showCancelButton: true,
+    confirmButtonText: "Guardar",
+    cancelButtonText: "Cancelar",
+    focusConfirm: false,
+    preConfirm: () => {
+      const title  = document.getElementById("swal-title").value.trim();
+      const artist = document.getElementById("swal-artist").value.trim();
+      const cover  = document.getElementById("swal-cover").files[0] ?? null;
+      if (!title)  { Swal.showValidationMessage("El título es requerido");  return false; }
+      if (!artist) { Swal.showValidationMessage("El artista es requerido"); return false; }
+      return { title, artist, coverFile: cover };
+    },
+  });
+
+  if (!formData) return;
+
+  Swal.fire({
+    ...swalBase, title: "Guardando cambios…",
+    html: `<div style="height:6px;border-radius:999px;background:#d8cfc5;overflow:hidden">
+             <div id="swal-up-fill" style="height:100%;width:0%;background:#6b5a4e;border-radius:999px;transition:width .2s"></div>
+           </div>`,
+    allowOutsideClick: false, showConfirmButton: false,
+  });
+
+  try {
+    const updated = await updateSong(s, formData, (p) => {
+      const fill = document.getElementById("swal-up-fill");
+      if (fill) fill.style.width = `${p}%`;
+    });
+    const updatedList = songs.map((x) => x.id === s.id ? updated : x);
+    writeCache(updatedList);
+    setSongs(updatedList);
+    Swal.fire({ ...swalBase, title: "¡Canción actualizada! ✏️", icon: "success", timer: 1600, showConfirmButton: false });
+  } catch (err) {
+    Swal.fire({ ...swalBase, title: "Error al guardar", text: err.message, icon: "error", confirmButtonText: "Entendido" });
+  }
+}, [songs]);
+
   // ── Delete handler ────────────────────────────────────────────────────────
   const handleDeleteSong = useCallback(async (s) => {
     const res = await Swal.fire({
@@ -681,41 +748,42 @@ function Reproductor() {
 
           {/* ── BIBLIOTECA ── */}
           {tab === "library" && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="p-4 pt-16">
-              <div className="flex items-center justify-between mb-0.5">
-                <h1 className="text-3xl font-bold" style={{ color: theme.text }}>Biblioteca</h1>
-                <motion.button whileTap={{ scale: 0.92 }} onClick={handleUploadSong} disabled={uploading}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border-none cursor-pointer transition disabled:opacity-50"
-                  style={{ backgroundColor: theme.accent, color: theme.light }}>
-                  <RiAddLine size={16} />
-                  {uploading ? "Subiendo…" : "Agregar"}
-                </motion.button>
-              </div>
-              <p className="text-sm mb-4" style={{ color: theme.muted }}>{songs.length} canciones</p>
-              <SearchBar value={search} onChange={handleSearch} theme={theme} />
-              {renderSongList(
-                filteredSongs,
-                <RiSearch2Line size={42} style={{ color: theme.border }} />,
-                `Sin resultados para "${search}"`,
-                true, // muestra botón eliminar
-              )}
-            </motion.div>
-          )}
+  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="p-4 pt-16">
+    <div className="flex items-center justify-between mb-0.5">
+      <h1 className="text-3xl font-bold" style={{ color: theme.text }}>Biblioteca</h1>
+      <motion.button whileTap={{ scale: 0.92 }} onClick={handleUploadSong} disabled={uploading}
+        className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border-none cursor-pointer transition disabled:opacity-50"
+        style={{ backgroundColor: theme.accent, color: theme.light }}>
+        <RiAddLine size={16} />
+        {uploading ? "Subiendo…" : "Agregar"}
+      </motion.button>
+    </div>
+    <p className="text-sm mb-4" style={{ color: theme.muted }}>{songs.length} canciones</p>
+    <SearchBar value={search} onChange={handleSearch} theme={theme} />
+    {renderSongList(
+      filteredSongs,
+      <RiSearch2Line size={42} style={{ color: theme.border }} />,
+      `Sin resultados para "${search}"`,
+      true, // ← habilita botones ✏️ y 🗑 en cada fila
+    )}
+  </motion.div>
+)}
 
           {/* ── FAVORITOS ── */}
           {tab === "favorites" && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="p-4 pt-16">
-              <h1 className="text-3xl font-bold mb-0.5" style={{ color: theme.text }}>Favoritos</h1>
-              <p className="text-sm mb-4" style={{ color: theme.muted }}>
-                {favSongs.length} canción{favSongs.length !== 1 ? "es" : ""}
-              </p>
-              {renderSongList(
-                favSongs,
-                <RiHeart3Line size={48} style={{ color: theme.border }} />,
-                "Toca el ♥ en cualquier canción para verla aquí",
-              )}
-            </motion.div>
-          )}
+  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="p-4 pt-16">
+    <h1 className="text-3xl font-bold mb-0.5" style={{ color: theme.text }}>Favoritos</h1>
+    <p className="text-sm mb-4" style={{ color: theme.muted }}>
+      {favSongs.length} canción{favSongs.length !== 1 ? "es" : ""}
+    </p>
+    {renderSongList(
+      favSongs,
+      <RiHeart3Line size={48} style={{ color: theme.border }} />,
+      "Toca el ♥ en cualquier canción para verla aquí",
+      false, // ← sin botones de editar/eliminar en favoritos
+    )}
+  </motion.div>
+)}
         </div>
       </main>
 
