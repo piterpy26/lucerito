@@ -733,7 +733,7 @@ function Reproductor() {
                 <VolumeSlider volume={volume} onChange={changeVolume} theme={theme} />
 
                 <motion.button whileTap={{ scale: 0.98 }} type="button" onClick={toggleFavSong}
-                  className="w-full py-2.5 rounded-2xl flex items-center justify-center gap-2 text-sm font-medium transition-all duration-200 border-none"
+                  className="w-full py-2.5 rounded-2xl flex items-center justify-center gap-2 text-sm font-medium transition-all duration-200 border-none text-white"
                   style={{
                     backgroundColor: isFavSong ? theme.accent : "transparent",
                     outline: `1.5px solid ${isFavSong ? theme.accent : theme.border}`,
