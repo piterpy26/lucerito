@@ -70,7 +70,7 @@ const Gift = () => (
   <div className="fixed inset-0 overflow-hidden flex items-center justify-center"
     style={{ backgroundColor: "#1a1410" }}>
     <motion.span
-      className="relative z-0 select-none"
+      className="relative z-50 select-none"
       style={{ fontSize: "clamp(7rem, 40vw, 18rem)", lineHeight: 1 }}
       animate={{ rotate: [-5, 5, -5], scale: [1, 1.08, 1] }}
       transition={{ duration: 2.8, repeat: Infinity, ease: "easeInOut" }}
