@@ -9,6 +9,7 @@ import LoginPage from "./pages/LoginPage";
 import Reproductor from "./pages/Reproductor";
 import SistemaSolar from "./pages/SistemaSolar";
 import PrivateRoute from "./routes/PrivateRoute";
+import MilRazones from "./pages/MilRazones";
 
 const GIFT_MODE = import.meta.env.VITE_MODE_GIFT_PREVIEW === "true";
 
@@ -21,7 +22,8 @@ const App = () => {
   return (
     <Router>
       <Routes>
-        <Route path="*" element={<Navigate to="/login" replace />} />
+        <Route path="/razones" element={<MilRazones />} />
+        <Route path="*" element={<Navigate to="/razones" replace />} />
         <Route path="/login" element={<LoginPage />} />
         <Route element={<PrivateRoute />}>
           <Route path="/"             element={<HomePage />}    />

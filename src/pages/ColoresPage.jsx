@@ -6,6 +6,8 @@ import amarillaImg from "../assets/images/colores/amarilla.jpg";
 import azuladoImg from "../assets/images/colores/azulado.jpg";
 import moradoImg from "../assets/images/colores/morado.jpg";
 import verdeImg from "../assets/images/colores/verde.jpg";
+import corazonesImg from "../assets/images/colores/corazones.png";
+import llenoDeAmorImg from "../assets/images/colores/lleno-de-amor.png";
 
 const ColoresPage = () => {
   const [mode, setMode] = useState("1x1");
@@ -87,7 +89,7 @@ const ColoresPage = () => {
           <h1 className="text-md font-black text-slate-900 tracking-tight drop-shadow-sm">
             Eres auténticamente un Lucero en mi vida
             <img
-              src="/src/assets/images/colores/corazones.png"
+              src={corazonesImg}
               alt="corazones"
               className="w-8 h-8 inline-block ml-4"
             />
@@ -136,7 +138,7 @@ const ColoresPage = () => {
             
             Debes ser tú quien pinte el resto de mi vida mi amor
             <img
-              src="/src/assets/images/colores/lleno-de-amor.png"
+              src={llenoDeAmorImg}
               alt="lleno de amor"
               className="w-10 h-10 inline-block ml-4"
             />
