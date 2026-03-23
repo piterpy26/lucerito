@@ -246,39 +246,6 @@ const DeleteProgress = memo(function DeleteProgress({ state }) {
   );
 });
 
-// Barra de descarga — alimentada por react-use-downloader
-const DownloadProgress = memo(function DownloadProgress({
-  percentage,
-  isInProgress,
-  onCancel,
-}) {
-  if (!isInProgress) return null;
-  return (
-    <div className="w-80 mx-auto mb-3 shrink-0">
-      <div className="flex justify-between items-center mb-1">
-        <p className="text-[11px] font-bold text-[#3a2a1c]">Descargando…</p>
-        <div className="flex items-center gap-2">
-          <p className="text-[11px] text-[#6b5a4e] font-semibold">
-            {Math.round(percentage)}%
-          </p>
-          <button
-            onClick={onCancel}
-            className="text-[10px] text-red-500 font-semibold underline leading-none"
-          >
-            Cancelar
-          </button>
-        </div>
-      </div>
-      <div className="w-full bg-[#d8cfc5] rounded-full h-1.5 overflow-hidden">
-        <div
-          className="bg-[#6b5a4e] h-1.5 rounded-full transition-all duration-200"
-          style={{ width: `${percentage}%` }}
-        />
-      </div>
-    </div>
-  );
-});
-
 const FilterBar = memo(function FilterBar({ filter, counts, onSelect }) {
   return (
     <div className="flex gap-2 mb-4 flex-wrap shrink-0">
@@ -531,9 +498,7 @@ function BaulRecuerdosPage() {
   const menuRef = useRef(null);
   const lbRef = useRef({}); // bridge handlers → botones del Lightbox
 
-  // react-use-downloader — maneja fetch, progreso y cancelación automáticamente
   const { download, percentage, isInProgress, cancel } = useDownloader();
-
   const [items, setItems] = useState([]);
   const [filter, setFilter] = useState("all");
   const [view, setView] = useState("grid");
@@ -548,6 +513,40 @@ function BaulRecuerdosPage() {
   const [deleteState, setDeleteState] = useState(DELETE_INIT);
 
   const isDeleting = deleteState.done < deleteState.total;
+
+  useEffect(() => {
+    if (isInProgress) {
+      Swal.fire({
+        ...swalBase,
+        title: "Descargando…",
+        html: `<div style="font-size:13px;color:#6b5a4e">Preparando archivo, por favor espera.</div>
+             <div id="swal-dl-bar" style="margin-top:10px;height:6px;border-radius:999px;background:#d8cfc5;overflow:hidden">
+               <div id="swal-dl-fill" style="height:100%;width:0%;background:#6b5a4e;border-radius:999px;transition:width .2s"></div>
+             </div>
+             <div id="swal-dl-pct" style="margin-top:6px;font-size:12px;font-weight:700;color:#3a2a1c">0%</div>`,
+        allowOutsideClick: false,
+        showConfirmButton: false,
+        showCancelButton: true,
+        cancelButtonText: "Cancelar",
+        cancelButtonColor: "#c0392b",
+        didOpen: () => Swal.showLoading(),
+      }).then((result) => {
+        if (result.dismiss === Swal.DismissReason.cancel) cancel();
+      });
+    } else {
+      if (Swal.isVisible()) Swal.close();
+    }
+  }, [isInProgress]); // solo se dispara al iniciar/terminar — no en cada %
+
+  // Actualiza la barra interna sin reabrir el Swal
+  useEffect(() => {
+    if (!isInProgress) return;
+    const pct = Math.round(percentage);
+    const fill = document.getElementById("swal-dl-fill");
+    const text = document.getElementById("swal-dl-pct");
+    if (fill) fill.style.width = `${pct}%`;
+    if (text) text.textContent = `${pct}%`;
+  }, [percentage, isInProgress]);
 
   useEffect(() => {
     const handle = (e) => {
@@ -1034,11 +1033,6 @@ function BaulRecuerdosPage() {
         {/* Barras de progreso */}
         <UploadProgress state={uploadState} />
         <DeleteProgress state={deleteState} />
-        <DownloadProgress
-          percentage={percentage}
-          isInProgress={isInProgress}
-          onCancel={cancel}
-        />
 
         {/* ── Contenido scrollable ── */}
         <div className="flex-1 overflow-y-auto min-h-0 pr-1 pb-4 scrollbar-thin scrollbar-thumb-[#a09080] scrollbar-track-transparent hover:scrollbar-thumb-[#6b5a4e]">
@@ -1127,7 +1121,6 @@ function BaulRecuerdosPage() {
           ],
         }}
         download={{
-          // Usa react-use-downloader — misma lógica que los botones de lista
           download: ({ slide }) => {
             const url = slide?.src ?? slide?.sources?.[0]?.src;
             const name = slide?.downloadName ?? "archivo";
