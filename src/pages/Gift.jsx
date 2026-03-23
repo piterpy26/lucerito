@@ -10,7 +10,7 @@ const BALLOONS = [
 
 const Balloon = ({ x, color, delay, size }) => (
   <motion.div
-    className="absolute flex flex-col items-center"
+    className="absolute flex flex-col items-center z-20"
     style={{ left: x, bottom: "-10%" }}
     initial={{ y: 0 }}
     animate={{ y: "-110vh" }}
@@ -37,7 +37,7 @@ const Gift = () => (
     {BALLOONS.map((b, i) => <Balloon key={i} {...b} />)}
 
     <motion.span
-      className="relative z-10 select-none"
+      className="relative z-0 select-none"
       style={{ fontSize: "clamp(7rem, 40vw, 18rem)", lineHeight: 1 }}
       animate={{ rotate: [-5, 5, -5], scale: [1, 1.08, 1] }}
       transition={{ duration: 2.8, repeat: Infinity, ease: "easeInOut" }}
