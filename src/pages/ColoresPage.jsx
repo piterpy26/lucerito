@@ -31,7 +31,7 @@ const ColoresPage = () => {
   };
 
   const texto_mensaje =
-    "Me he enamorado de lo bonita que es tu sonrisa, del lustre que tienen tus ojos, los espirales de tu cabello, la suavidad de tus manos y el vaivén de tus caderas. Sencillamente me he enamorado de lo auténtica que eres no podría definir idealismo según platón sin pensar en tí. Te amo ❤️";
+    "Me he enamorado de lo bonita que es tu sonrisa, del lustre que tienen tus ojos, los espirales de tu cabello, la suavidad de tus manos y el vaivén de tus caderas. Me he enamorado de tu belleza física y la gentileza de tu corazón, Te amo ❤️";
 
   const mensaje_final = `
     La vida debería ser de colores:
@@ -84,8 +84,8 @@ const ColoresPage = () => {
 
         {/* MÓVIL: título izquierda, controles derecha */}
         <div className="flex items-center justify-between gap-4 sm:hidden">
-          <h1 className="text-lg font-black text-slate-900 tracking-tight drop-shadow-sm">
-            Debes ser tú quien pinte el resto de mi vida mi amor
+          <h1 className="text-md font-black text-slate-900 tracking-tight drop-shadow-sm">
+            Eres auténticamente un Lucero en mi vida
             <img
               src="/src/assets/images/colores/corazones.png"
               alt="corazones"
@@ -133,7 +133,8 @@ const ColoresPage = () => {
 
           {/* Título — centro */}
           <h1 className="text-2xl md:text-3xl font-black text-slate-900 text-center flex-1 drop-shadow-sm">
-            Eres auténticamente un Lucero en mi vida
+            
+            Debes ser tú quien pinte el resto de mi vida mi amor
             <img
               src="/src/assets/images/colores/lleno-de-amor.png"
               alt="lleno de amor"
