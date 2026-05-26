@@ -1,7 +1,9 @@
 import { signOut } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
 import { auth } from "../firebase/config";
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
+import OptimizedImage from "../components/OptimizedImage";
+import { useHaptics } from "../hooks/useHaptics";
 
 const P = {
   bg: "bg-[#f7f4ea]",

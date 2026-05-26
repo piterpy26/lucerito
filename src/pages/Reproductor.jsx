@@ -718,6 +718,12 @@ function Reproductor() {
     const audioEl = document.querySelector("audio");
     if (!audioEl) return;
 
+    // Sincronización inicial al montar la página
+    if (audioEl.currentTime > 0) {
+      setCurrentTime(audioEl.currentTime);
+      setDuration(audioEl.duration || 0);
+    }
+
     const onTime = () => {
       if (!dragRef.current) setCurrentTime(audioEl.currentTime);
     };
@@ -727,8 +733,7 @@ function Reproductor() {
 
     audioEl.addEventListener("timeupdate", onTime);
     audioEl.addEventListener("loadedmetadata", onMeta);
-    if (audioEl.duration) setDuration(audioEl.duration);
-
+    
     return () => {
       audioEl.removeEventListener("timeupdate", onTime);
       audioEl.removeEventListener("loadedmetadata", onMeta);
