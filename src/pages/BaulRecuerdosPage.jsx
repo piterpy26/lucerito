@@ -19,7 +19,10 @@ import {
 } from "react-icons/ri";
 import { useNavigate } from "react-router-dom";
 import Swal from "sweetalert2";
+import { openDB } from "idb";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import Lightbox, { useLightboxState } from "yet-another-react-lightbox";
+import { useHaptics } from "../hooks/useHaptics";
 import Download from "yet-another-react-lightbox/plugins/download";
 import Video from "yet-another-react-lightbox/plugins/video";
 import Zoom from "yet-another-react-lightbox/plugins/zoom";
@@ -30,13 +33,17 @@ import {
   deleteMedia,
   downloadAllAsZip,
   fetchMedia,
+  fetchBlob,
   shareMedia,
   uploadMedia,
 } from "../firebase/mediaService";
 
 // ── Constantes ────────────────────────────────────────────────────────────────
-const CACHE_KEY = "baul_media_cache";
-const CACHE_TTL = 5 * 60_000;
+const DB_NAME   = "BaulDB";
+const STORE_NAME = "media_store";
+const CACHE_ID   = "media_list";
+const CACHE_TTL  = 5 * 60_000;
+
 const IS_MOBILE =
   /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent) ||
   window.innerWidth < 640;
@@ -63,25 +70,39 @@ const MASONRY_CSS = `
   @media(min-width:1280px) { .baul-compact{column-count:10} .baul-grid{column-count:6} }
 `;
 
-// ── Cache ─────────────────────────────────────────────────────────────────────
-function readCache() {
+// ── Cache (IndexedDB) ─────────────────────────────────────────────────────────
+async function getDB() {
+  return openDB(DB_NAME, 1, {
+    upgrade(db) {
+      if (!db.objectStoreNames.contains(STORE_NAME))
+        db.createObjectStore(STORE_NAME);
+    },
+  });
+}
+
+async function readCache() {
   try {
-    const raw = sessionStorage.getItem(CACHE_KEY);
-    if (!raw) return null;
-    const { data, ts } = JSON.parse(raw);
-    if (Date.now() - ts > CACHE_TTL) {
-      sessionStorage.removeItem(CACHE_KEY);
+    const db = await getDB();
+    const cached = await db.get(STORE_NAME, CACHE_ID);
+    if (!cached) return null;
+    if (Date.now() - cached.ts > CACHE_TTL) {
+      await db.delete(STORE_NAME, CACHE_ID);
       return null;
     }
-    return data;
-  } catch {
+    return cached.data;
+  } catch (err) {
+    console.warn("readCache error:", err);
     return null;
   }
 }
-function writeCache(data) {
+
+async function writeCache(data) {
   try {
-    sessionStorage.setItem(CACHE_KEY, JSON.stringify({ data, ts: Date.now() }));
-  } catch {}
+    const db = await getDB();
+    await db.put(STORE_NAME, { data, ts: Date.now() }, CACHE_ID);
+  } catch (err) {
+    console.warn("writeCache error:", err);
+  }
 }
 
 // ── Utils ─────────────────────────────────────────────────────────────────────
@@ -111,25 +132,25 @@ async function copyToClipboard(text) {
 
 // ── Helpers upload ────────────────────────────────────────────────────────────
 async function confirmDuplicates(files, items) {
-  const existingNames = new Set(
-    items.map((i) => i.name?.toLowerCase().trim()).filter(Boolean),
-  );
-  const dupes = files.filter((f) =>
-    existingNames.has(f.name.toLowerCase().trim()),
-  );
+  const getFileKey = (f) => `${f.name?.toLowerCase().trim()}_${f.size || 0}`;
+  const getItemKey = (i) => `${i.name?.toLowerCase().trim()}_${i.size || 0}`;
+
+  const existingKeys = new Set(items.map(getItemKey));
+  const dupes = files.filter((f) => existingKeys.has(getFileKey(f)));
+
   if (!dupes.length) return { filesToUpload: files, baseItems: items };
 
   const dupListHTML = dupes
     .map(
       (f) =>
-        `<li style="font-size:12px;padding:2px 0;text-align:left">⚠️ ${f.name}</li>`,
+        `<li style="font-size:12px;padding:2px 0;text-align:left">⚠️ ${f.name} <span style="opacity:0.6">(${(f.size / 1024 / 1024).toFixed(2)} MB)</span></li>`,
     )
     .join("");
 
   const result = await Swal.fire({
     ...swalBase,
     title: `${dupes.length} duplicado${dupes.length > 1 ? "s" : ""} detectado${dupes.length > 1 ? "s" : ""}`,
-    html: `<p style="font-size:13px;margin-bottom:8px">Ya existen en el baúl:</p>
+    html: `<p style="font-size:13px;margin-bottom:8px">Ya existen en el baúl (mismo nombre y tamaño):</p>
            <ul style="max-height:120px;overflow-y:auto;padding:0 4px;list-style:none;margin:0">${dupListHTML}</ul>`,
     icon: "warning",
     showDenyButton: true,
@@ -142,9 +163,7 @@ async function confirmDuplicates(files, items) {
 
   if (result.isDismissed) return null;
   if (result.isConfirmed) {
-    const filesToUpload = files.filter(
-      (f) => !existingNames.has(f.name.toLowerCase().trim()),
-    );
+    const filesToUpload = files.filter((f) => !existingKeys.has(getFileKey(f)));
     if (!filesToUpload.length) {
       await Swal.fire({
         ...swalBase,
@@ -159,13 +178,7 @@ async function confirmDuplicates(files, items) {
   }
   return {
     filesToUpload: files,
-    baseItems: items.filter(
-      (item) =>
-        !dupes.some(
-          (f) =>
-            f.name.toLowerCase().trim() === item.name?.toLowerCase().trim(),
-        ),
-    ),
+    baseItems: items.filter((item) => !dupes.some((f) => getFileKey(f) === getItemKey(item))),
   };
 }
 
@@ -487,6 +500,17 @@ const MediaListItem = memo(function MediaListItem({
   );
 });
 
+// ── Hook Ventana ─────────────────────────────────────────────────────────────
+const useWindowWidth = () => {
+  const [w, setW] = useState(window.innerWidth);
+  useEffect(() => {
+    const h = () => setW(window.innerWidth);
+    window.addEventListener("resize", h);
+    return () => window.removeEventListener("resize", h);
+  }, []);
+  return w;
+};
+
 // ── COMPONENTE PRINCIPAL ──────────────────────────────────────────────────────
 function BaulRecuerdosPage() {
   const navigate = useNavigate();
@@ -494,7 +518,8 @@ function BaulRecuerdosPage() {
   const actionsRef = useRef(null);
   const menuRef = useRef(null);
   const lbRef = useRef({});
-  const abortRef = useRef(null); // AbortController activo de descarga
+  const abortRef = useRef(null);
+  const width = useWindowWidth();
 
   const [items, setItems] = useState([]);
   const [filter, setFilter] = useState("all");
@@ -511,6 +536,61 @@ function BaulRecuerdosPage() {
 
   const isDeleting = deleteState.done < deleteState.total;
 
+  // ── Lógica de Columnas y Agrupación ───────────────────────────────────────
+  const getCols = useCallback((v, w) => {
+    if (v === "list") return 1;
+    if (v === "compact") {
+      if (w < 480) return 4;
+      if (w < 768) return 6;
+      if (w < 1280) return 8;
+      return 10;
+    }
+    // grid
+    if (w < 480) return 3;
+    if (w < 768) return 4;
+    if (w < 1280) return 5;
+    return 6;
+  }, []);
+
+  const cols = getCols(view, width);
+  
+  const filtered = useMemo(() => {
+    if (filter === "all") return items;
+    return items.filter((i) =>
+      filter === "image" ? isImage(i.type) : !isImage(i.type),
+    );
+  }, [items, filter]);
+
+  const rows = useMemo(() => {
+    const res = [];
+    for (let i = 0; i < filtered.length; i += cols) {
+      res.push(filtered.slice(i, i + cols));
+    }
+    return res;
+  }, [filtered, cols]);
+
+  // ── Virtualización ──────────────────────────────────────────────────────────
+  const parentRef = useRef(null);
+  
+  const estimateSize = useCallback(() => {
+    if (view === "list") return IS_MOBILE ? 78 : 82;
+    const containerW = Math.min(width, 1152) - 40;
+    const cellW = containerW / cols;
+    return cellW + (view === "compact" ? 4 : 8);
+  }, [view, width, cols]);
+
+  const rowVirtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize,
+    overscan: 4,
+  });
+
+  // Forzar recalcular si cambia vista o ancho
+  useEffect(() => {
+    rowVirtualizer.measure();
+  }, [view, width, rowVirtualizer]);
+
   // ── Efectos de inicialización ─────────────────────────────────────────────
   useEffect(() => {
     const handle = (e) => {
@@ -525,14 +605,14 @@ function BaulRecuerdosPage() {
 
   useEffect(() => {
     (async () => {
-      const cached = readCache();
+      const cached = await readCache();
       if (cached) {
         setItems(cached);
         setLoading(false);
         return;
       }
       const data = await fetchMedia();
-      writeCache(data);
+      await writeCache(data);
       setItems(data);
       setLoading(false);
     })();
@@ -578,31 +658,39 @@ function BaulRecuerdosPage() {
   );
 
   // ── triggerDownload — fetch con AbortController + Swal ───────────────────
-  const triggerDownload = useCallback(async (url, name) => {
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
+  const triggerDownload = useCallback(async (url, name, options = {}) => {
+    const { isBatch = false, controller: batchController } = options;
+
+    // Si no es batch, abortamos cualquier descarga individual previa
+    if (!isBatch) abortRef.current?.abort();
+
+    const controller = batchController || new AbortController();
+    if (!isBatch) abortRef.current = controller;
+
     let cancelled = false;
 
-    Swal.fire({
-      ...swalBase,
-      title: "Descargando…",
-      html: `<div style="font-size:13px;color:#6b5a4e">Preparando archivo, espera un momento.</div>
-             <div style="margin-top:10px;height:6px;border-radius:999px;background:#d8cfc5;overflow:hidden">
-               <div id="swal-dl-fill" style="height:100%;width:0%;background:#6b5a4e;border-radius:999px;transition:width .15s"></div>
-             </div>
-             <div id="swal-dl-pct" style="margin-top:6px;font-size:12px;font-weight:700;color:#3a2a1c">0%</div>`,
-      allowOutsideClick: false,
-      showConfirmButton: false,
-      showCancelButton: true,
-      cancelButtonText: "Cancelar",
-      cancelButtonColor: "#c0392b",
-    }).then((r) => {
-      if (r.dismiss === Swal.DismissReason.cancel) {
-        cancelled = true;
-        controller.abort();
-      }
-    });
+    // Solo mostramos el Swal individual si NO es un lote
+    if (!isBatch) {
+      Swal.fire({
+        ...swalBase,
+        title: "Descargando…",
+        html: `<div style="font-size:13px;color:#6b5a4e">Preparando archivo, espera un momento.</div>
+               <div style="margin-top:10px;height:6px;border-radius:999px;background:#d8cfc5;overflow:hidden">
+                 <div id="swal-dl-fill" style="height:100%;width:0%;background:#6b5a4e;border-radius:999px;transition:width .15s"></div>
+               </div>
+               <div id="swal-dl-pct" style="margin-top:6px;font-size:12px;font-weight:700;color:#3a2a1c">0%</div>`,
+        allowOutsideClick: false,
+        showConfirmButton: false,
+        showCancelButton: true,
+        cancelButtonText: "Cancelar",
+        cancelButtonColor: "#c0392b",
+      }).then((r) => {
+        if (r.dismiss === Swal.DismissReason.cancel) {
+          cancelled = true;
+          controller.abort();
+        }
+      });
+    }
 
     try {
       const res = await fetch(url, { signal: controller.signal });
@@ -619,22 +707,23 @@ function BaulRecuerdosPage() {
         if (done) break;
         if (cancelled || controller.signal.aborted) {
           await reader.cancel();
-          return;
+          return false;
         }
 
         chunks.push(value);
         received += value.length;
 
+        // Actualizamos UI solo si tenemos los elementos (individual o batch)
         if (total) {
           const pct = Math.round((received / total) * 100);
-          const fill = document.getElementById("swal-dl-fill");
-          const text = document.getElementById("swal-dl-pct");
+          const fill = document.getElementById(isBatch ? "swal-batch-fill" : "swal-dl-fill");
+          const text = document.getElementById(isBatch ? "swal-batch-pct" : "swal-dl-pct");
           if (fill) fill.style.width = `${pct}%`;
           if (text) text.textContent = `${pct}%`;
         }
       }
 
-      if (cancelled || controller.signal.aborted) return;
+      if (cancelled || controller.signal.aborted) return false;
 
       const blob = new Blob(chunks);
       const blobUrl = URL.createObjectURL(blob);
@@ -644,25 +733,33 @@ function BaulRecuerdosPage() {
       });
       a.click();
       setTimeout(() => URL.revokeObjectURL(blobUrl), 10_000);
-      Swal.close();
+
+      if (!isBatch) Swal.close();
+      return true;
     } catch (err) {
       if (err?.name === "AbortError") {
-        Swal.fire({
-          ...swalBase,
-          title: "Descarga cancelada",
-          icon: "info",
-          timer: 1500,
-          showConfirmButton: false,
-        });
+        if (!isBatch) {
+          Swal.fire({
+            ...swalBase,
+            title: "Descarga cancelada",
+            icon: "info",
+            timer: 1500,
+            showConfirmButton: false,
+          });
+        }
       } else {
-        Swal.fire({
-          ...swalBase,
-          title: "Error al descargar",
-          text: "Intenta de nuevo.",
-          icon: "error",
-          confirmButtonText: "Entendido",
-        });
+        if (!isBatch) {
+          Swal.fire({
+            ...swalBase,
+            title: "Error al descargar",
+            text: "Intenta de nuevo.",
+            icon: "error",
+            confirmButtonText: "Entendido",
+          });
+        }
+        throw err;
       }
+      return false;
     }
   }, []);
 
@@ -681,38 +778,18 @@ function BaulRecuerdosPage() {
 
   const handleLightboxShare = useCallback(async (url, name) => {
     try {
-      if (navigator.canShare) {
-        try {
-          const res = await fetch(url);
-          const blob = await res.blob();
-          const ext = blob.type.split("/")[1] ?? "jpg";
-          const safeName = name.includes(".") ? name : `${name}.${ext}`;
-          const file = new File([blob], safeName, { type: blob.type });
-          if (navigator.canShare({ files: [file] })) {
-            await navigator.share({ files: [file], title: safeName });
-            return;
-          }
-        } catch (e) {
-          if (e?.name === "AbortError") return;
-          if (import.meta.env.DEV) console.warn("share blob:", e);
-        }
+      // Usamos el servicio centralizado para evitar redundancia
+      const result = await shareMedia({ url, name });
+      if (result.method === "clipboard") {
+        Swal.fire({
+          ...swalBase,
+          title: "Enlace copiado 🔗",
+          text: "Tu navegador no soporta compartir. Se copió el enlace.",
+          icon: "success",
+          timer: 2000,
+          showConfirmButton: false,
+        });
       }
-      if (navigator.share) {
-        await navigator.share({ title: name, url });
-        return;
-      }
-      const ok = await copyToClipboard(url);
-      Swal.fire({
-        ...swalBase,
-        title: ok ? "Enlace copiado 🔗" : "No se pudo compartir",
-        text: ok
-          ? "Tu navegador no soporta compartir. Se copió el enlace."
-          : undefined,
-        icon: ok ? "success" : "error",
-        timer: ok ? 2000 : undefined,
-        showConfirmButton: !ok,
-        confirmButtonText: "Entendido",
-      });
     } catch (err) {
       if (err?.name !== "AbortError" && import.meta.env.DEV)
         console.warn("lightboxShare:", err);
@@ -819,9 +896,54 @@ function BaulRecuerdosPage() {
     if (!selected.size) return;
     setShowActions(false);
     const toDownload = items.filter((i) => selected.has(i.id));
-    if (IS_MOBILE) {
-      for (const item of toDownload)
-        await triggerDownload(item.url, item.name ?? "archivo");
+
+    if (IS_MOBILE && toDownload.length > 1) {
+      const controller = new AbortController();
+      let cancelled = false;
+
+      Swal.fire({
+        ...swalBase,
+        title: `Descargando ${toDownload.length} archivos`,
+        html: `<div id="swal-batch-info" style="font-size:13px;color:#6b5a4e">Iniciando…</div>
+               <div style="margin-top:10px;height:6px;border-radius:999px;background:#d8cfc5;overflow:hidden">
+                 <div id="swal-batch-fill" style="height:100%;width:0%;background:#6b5a4e;border-radius:999px;transition:width .15s"></div>
+               </div>
+               <div id="swal-batch-pct" style="margin-top:6px;font-size:12px;font-weight:700;color:#3a2a1c">0%</div>`,
+        allowOutsideClick: false,
+        showConfirmButton: false,
+        showCancelButton: true,
+        cancelButtonText: "Cancelar todo",
+        cancelButtonColor: "#c0392b",
+      }).then((r) => {
+        if (r.dismiss === Swal.DismissReason.cancel) {
+          cancelled = true;
+          controller.abort();
+        }
+      });
+
+      for (let i = 0; i < toDownload.length; i++) {
+        if (cancelled) break;
+        const item = toDownload[i];
+        const infoEl = document.getElementById("swal-batch-info");
+        if (infoEl) infoEl.textContent = `Descargando ${i + 1} de ${toDownload.length}: ${item.name || "archivo"}`;
+
+        await triggerDownload(item.url, item.name ?? "archivo", {
+          isBatch: true,
+          controller,
+        });
+      }
+
+      if (!cancelled) {
+        Swal.fire({
+          ...swalBase,
+          title: "Descargas completadas",
+          icon: "success",
+          timer: 2000,
+          showConfirmButton: false,
+        });
+      }
+    } else if (IS_MOBILE) {
+      await triggerDownload(toDownload[0].url, toDownload[0].name ?? "archivo");
     } else {
       downloadAllAsZip(toDownload);
     }
@@ -874,7 +996,7 @@ function BaulRecuerdosPage() {
         setUploadState((s) => ({ ...s, done: s.done + 1 }));
       }
       const updated = [...newItems, ...baseItems];
-      writeCache(updated);
+      await writeCache(updated);
       setItems(updated);
       setUploadState(UPLOAD_INIT);
       e.target.value = "";
@@ -904,7 +1026,7 @@ function BaulRecuerdosPage() {
       setDeleteState((s) => ({ ...s, done: idx + 1 }));
     }
     const updated = items.filter((i) => !selected.has(i.id));
-    writeCache(updated);
+    await writeCache(updated);
     setItems(updated);
     setSelected(new Set());
     setSelectMode(false);
@@ -926,7 +1048,7 @@ function BaulRecuerdosPage() {
       if (!res.isConfirmed) return;
       await deleteMedia(item.id, item.path);
       const updated = items.filter((i) => i.id !== item.id);
-      writeCache(updated);
+      await writeCache(updated);
       setItems(updated);
     },
     [items],
@@ -1019,7 +1141,10 @@ function BaulRecuerdosPage() {
                   key={key}
                   title={title}
                   aria-label={title}
-                  onClick={() => setView(key)}
+                  onClick={() => {
+                    haptics.light();
+                    setView(key);
+                  }}
                   className={`p-2 transition ${view === key ? "bg-[#6b5a4e] text-[#f0ebe4]" : "text-[#6b5a4e] hover:bg-[#c8bfb5]"}`}
                 >
                   <Icon size={16} />
@@ -1079,67 +1204,93 @@ function BaulRecuerdosPage() {
         <DeleteProgress state={deleteState} />
 
         {/* ── Contenido scrollable ── */}
-        <div className="flex-1 overflow-y-auto min-h-0 pr-1 pb-4 scrollbar-thin scrollbar-thumb-[#a09080] scrollbar-track-transparent hover:scrollbar-thumb-[#6b5a4e]">
-          {filtered.length === 0 && (
+        <div
+          ref={parentRef}
+          className="flex-1 overflow-y-auto min-h-0 pr-1 pb-4 scrollbar-thin scrollbar-thumb-[#a09080] scrollbar-track-transparent hover:scrollbar-thumb-[#6b5a4e]"
+        >
+          {filtered.length === 0 ? (
             <p className="text-center text-[#6b5a4e] py-24 text-sm">
               El baúl está esperando nuestros recuerdos 📭
             </p>
-          )}
-          {filtered.length > 0 && view === "compact" && (
-            <div className="baul-compact mt-2">
-              {filtered.map((item, i) => (
-                <MediaItem
-                  key={item.id}
-                  item={item}
-                  index={i}
-                  size="compact"
-                  selectMode={selectMode}
-                  isSel={selected.has(item.id)}
-                  isDel={deleting.has(item.id)}
-                  isDeleting={isDeleting}
-                  onOpen={handleOpen}
-                  onToggle={toggleSelect}
-                />
-              ))}
-            </div>
-          )}
-          {filtered.length > 0 && view === "grid" && (
-            <div className="baul-grid">
-              {filtered.map((item, i) => (
-                <MediaItem
-                  key={item.id}
-                  item={item}
-                  index={i}
-                  size="grid"
-                  selectMode={selectMode}
-                  isSel={selected.has(item.id)}
-                  isDel={deleting.has(item.id)}
-                  isDeleting={isDeleting}
-                  onOpen={handleOpen}
-                  onToggle={toggleSelect}
-                />
-              ))}
-            </div>
-          )}
-          {filtered.length > 0 && view === "list" && (
-            <div className="flex flex-col gap-2">
-              {filtered.map((item, i) => (
-                <MediaListItem
-                  key={item.id}
-                  item={item}
-                  index={i}
-                  selectMode={selectMode}
-                  isSel={selected.has(item.id)}
-                  isDel={deleting.has(item.id)}
-                  isDeleting={isDeleting}
-                  onOpen={handleOpen}
-                  onToggle={toggleSelect}
-                  onShare={handleShare}
-                  onCopyLink={handleCopyLink}
-                  onDownload={handleDownloadOne}
-                  onDelete={handleDeleteOne}
-                />
-              ))}
+          ) : (
+            <div
+              style={{
+                height: `${rowVirtualizer.getTotalSize()}px`,
+                width: "100%",
+                position: "relative",
+              }}
+            >
+              {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                const rowItems = rows[virtualRow.index];
+                if (!rowItems) return null;
+
+                if (view === "list") {
+                  const item = rowItems[0];
+                  return (
+                    <div
+                      key={virtualRow.key}
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        left: 0,
+                        width: "100%",
+                        height: `${virtualRow.size}px`,
+                        transform: `translateY(${virtualRow.start}px)`,
+                      }}
+                      className="pb-2"
+                    >
+                      <MediaListItem
+                        item={item}
+                        index={filtered.indexOf(item)}
+                        selectMode={selectMode}
+                        isSel={selected.has(item.id)}
+                        isDel={deleting.has(item.id)}
+                        isDeleting={isDeleting}
+                        onOpen={handleOpen}
+                        onToggle={toggleSelect}
+                        onShare={handleShare}
+                        onCopyLink={handleCopyLink}
+                        onDownload={handleDownloadOne}
+                        onDelete={handleDeleteOne}
+                      />
+                    </div>
+                  );
+                }
+
+                // Grid o Compact
+                return (
+                  <div
+                    key={virtualRow.key}
+                    style={{
+                      position: "absolute",
+                      top: 0,
+                      left: 0,
+                      width: "100%",
+                      height: `${virtualRow.size}px`,
+                      transform: `translateY(${virtualRow.start}px)`,
+                      display: "grid",
+                      gridTemplateColumns: `repeat(${cols}, 1fr)`,
+                      gap: view === "compact" ? "4px" : "8px",
+                    }}
+                  >
+                    {rowItems.map((item) => (
+                      <div key={item.id} className="aspect-square">
+                        <MediaItem
+                          item={item}
+                          index={filtered.indexOf(item)}
+                          size={view}
+                          selectMode={selectMode}
+                          isSel={selected.has(item.id)}
+                          isDel={deleting.has(item.id)}
+                          isDeleting={isDeleting}
+                          onOpen={handleOpen}
+                          onToggle={toggleSelect}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

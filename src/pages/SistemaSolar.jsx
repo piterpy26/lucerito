@@ -1,7 +1,7 @@
 // SistemaSolar.jsx — OPTIMIZADO MOBILE + UX FINAL ✅
 import { OrbitControls, Stars } from "@react-three/drei";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { memo, useCallback, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useMemo, useRef, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import * as THREE from "three";
 
@@ -309,14 +309,19 @@ const OrbitRing = memo(({ distance, highlight }) => {
 });
 
 // ─────────────────────────────────────────────
-// ASTEROIDES — memo, no recrea nunca
+// ASTEROIDES — Optimizado con InstancedMesh (1 draw call)
 // ─────────────────────────────────────────────
 const AsteroidBelt = memo(() => {
-  const ref = useRef();
+  const meshRef = useRef();
+  const count = 120;
+  
+  // Dummy object para cálculos de matriz
+  const dummy = useMemo(() => new THREE.Object3D(), []);
+
   const data = useMemo(
     () =>
-      Array.from({ length: 120 }, (_, i) => {
-        const a = (i / 120) * Math.PI * 2;
+      Array.from({ length: count }, (_, i) => {
+        const a = (i / count) * Math.PI * 2;
         const r = 12.8 + (Math.random() - 0.5) * 2;
         return {
           x: Math.cos(a) * r,
@@ -325,20 +330,29 @@ const AsteroidBelt = memo(() => {
           s: Math.random() * 0.1 + 0.04,
         };
       }),
-    [],
+    [count],
   );
+
+  useEffect(() => {
+    if (!meshRef.current) return;
+    data.forEach((a, i) => {
+      dummy.position.set(a.x, a.y, a.z);
+      dummy.scale.setScalar(a.s);
+      dummy.updateMatrix();
+      meshRef.current.setMatrixAt(i, dummy.matrix);
+    });
+    meshRef.current.instanceMatrix.needsUpdate = true;
+  }, [data, dummy]);
+
   useFrame((_, d) => {
-    if (ref.current) ref.current.rotation.y += d * 0.004;
+    if (meshRef.current) meshRef.current.rotation.y += d * 0.004;
   });
+
   return (
-    <group ref={ref}>
-      {data.map((a, i) => (
-        <mesh key={i} position={[a.x, a.y, a.z]}>
-          <sphereGeometry args={[a.s, 5, 5]} />
-          <meshLambertMaterial color="#686868" />
-        </mesh>
-      ))}
-    </group>
+    <instancedMesh ref={meshRef} args={[null, null, count]}>
+      <sphereGeometry args={[1, 5, 5]} />
+      <meshLambertMaterial color="#686868" />
+    </instancedMesh>
   );
 });
 
@@ -832,6 +846,15 @@ const SistemaSolar = () => {
   const [speed, setSpeed] = useState(1.0);
   const [paused, setPaused] = useState(false);
   const [showOrbits, setShowOrbits] = useState(true);
+  
+  // Optimización: Pausar renderizado si la pestaña no es visible
+  const [tabVisible, setTabVisible] = useState(true);
+
+  useEffect(() => {
+    const handleVisibility = () => setTabVisible(document.visibilityState === "visible");
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, []);
 
   const speedMultiplier = paused ? 0 : speed;
 
@@ -941,6 +964,7 @@ const SistemaSolar = () => {
       {/* ── CANVAS — solo re-renderiza Scene cuando cambian props 3D ── */}
       <Canvas
         camera={{ position: [0, 18, 48], fov: 45 }}
+        frameloop={tabVisible ? "always" : "never"}
         gl={{
           antialias: false,
           powerPreference: "high-performance",

@@ -2,6 +2,8 @@ import { useState } from "react";
 import { CiGrid41 } from "react-icons/ci";
 import { FiLogOut } from "react-icons/fi";
 import { useNavigate } from "react-router-dom";
+import OptimizedImage from "../components/OptimizedImage";
+import { useHaptics } from "../hooks/useHaptics";
 import amarillaImg from "../assets/images/colores/amarilla.jpg";
 import azuladoImg from "../assets/images/colores/azulado.jpg";
 import moradoImg from "../assets/images/colores/morado.jpg";
@@ -220,10 +222,10 @@ const ColoresPage = () => {
                     isActive ? "opacity-100" : "opacity-0"
                   } group-hover:opacity-100`}
                 >
-                  <img
+                  <OptimizedImage
                     src={card.img}
                     alt={card.alt}
-                    className="w-full h-full object-cover"
+                    className="w-full h-full"
                   />
                   <span className="absolute inset-0 bg-linear-to-t from-black/40 via-transparent to-transparent" />
                   <span className="absolute left-0 right-0 bottom-0 bg-white/90 backdrop-blur-sm text-slate-900 px-4 py-4 text-center">

@@ -101,7 +101,7 @@ export async function deleteMedia(id, path) {
 }
 
 // ── Fetch blob con timeout (evita colgarse en red lenta) ──────────────────────
-async function fetchBlob(url, timeoutMs = 30_000) {
+export async function fetchBlob(url, timeoutMs = 30_000) {
   const controller = new AbortController();
   const timer      = setTimeout(() => controller.abort(), timeoutMs);
   try {

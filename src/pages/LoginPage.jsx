@@ -13,6 +13,7 @@ import {
 import { useNavigate } from "react-router-dom";
 import Swal from "sweetalert2";
 import Carga from "../components/Carga";
+import OptimizedImage from "../components/OptimizedImage";
 import { auth } from "../firebase/config";
 import "./login.css";
 
@@ -116,17 +117,25 @@ function LoginPage() {
         <div className="flex flex-col lg:flex-row items-stretch bg-[#e8e0d8] rounded-3xl shadow-lg overflow-hidden">
           {/* ── IMAGEN ── */}
           <div className="w-full lg:w-1/2 h-52 sm:h-72 lg:h-auto relative shrink-0">
-            <img
-              src="/images/img-login2.jpg"
-              alt=""
-              className="w-full h-full object-cover lg:hidden"
-            />
-            <img
-              src="/images/img-login.jpg"
-              alt=""
-              className="hidden lg:block w-full h-full object-cover"
-            />
-            <div className="absolute inset-0 bg-black/10" />
+            {/* Mobile Image */}
+            <div className="lg:hidden w-full h-full">
+              <OptimizedImage
+                src="/images/img-login2.jpg"
+                alt="Login"
+                priority
+                className="w-full h-full"
+              />
+            </div>
+            {/* Desktop Image */}
+            <div className="hidden lg:block w-full h-full">
+              <OptimizedImage
+                src="/images/img-login.jpg"
+                alt="Login"
+                priority
+                className="w-full h-full"
+              />
+            </div>
+            <div className="absolute inset-0 bg-black/10 pointer-events-none" />
           </div>
 
           {/* ── FORMULARIO ── */}

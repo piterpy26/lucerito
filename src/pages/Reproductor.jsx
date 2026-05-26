@@ -2,7 +2,6 @@ import { AnimatePresence, motion } from "framer-motion";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   deleteSong,
-  fetchSongs,
   updateSong,
   uploadSong,
 } from "../firebase/musicService";
@@ -12,8 +11,6 @@ import {
   RiDeleteBinLine,
   RiHeart3Fill,
   RiHeart3Line,
-  RiHome4Fill,
-  RiHome4Line,
   RiMoonLine,
   RiMusic2Fill,
   RiMusic2Line,
@@ -30,6 +27,8 @@ import {
 import { useNavigate } from "react-router-dom";
 import Swal from "sweetalert2";
 import Carga from "../components/Carga";
+import { useMusicStore } from "../store/useMusicStore";
+import { useHaptics } from "../hooks/useHaptics";
 
 const themes = {
   dark: {
@@ -42,7 +41,6 @@ const themes = {
     light: "#e8dfd5",
     text: "#f5f0ea",
     muted: "#b0998a",
-    // botón favoritos activo/inactivo
     favActiveBg: "#8a7060",
     favActiveText: "#f5f0ea",
     favInactiveBg: "transparent",
@@ -59,7 +57,6 @@ const themes = {
     light: "#5c3d2e",
     text: "#2a1f18",
     muted: "#7a6355",
-    // botón favoritos activo/inactivo
     favActiveBg: "#8a6f5e",
     favActiveText: "#fdf8f3",
     favInactiveBg: "transparent",
@@ -68,10 +65,7 @@ const themes = {
   },
 };
 
-const LOCAL_KEY = "reproductor-favoritos";
 const THEME_KEY = "reproductor-theme";
-const CACHE_KEY = "reproductor-songs-cache";
-const CACHE_TTL = 5 * 60_000;
 const swalBase = {
   confirmButtonColor: "#6b5a4e",
   color: "#2e1f14",
@@ -107,26 +101,6 @@ const getGreeting = (name = "Lucerito") => {
   if (h < 20) return `🌆 Buena tarde ${name}`;
   return `🌙 Buena noche ${name}`;
 };
-
-function readCache() {
-  try {
-    const raw = sessionStorage.getItem(CACHE_KEY);
-    if (!raw) return null;
-    const { data, ts } = JSON.parse(raw);
-    if (Date.now() - ts > CACHE_TTL) {
-      sessionStorage.removeItem(CACHE_KEY);
-      return null;
-    }
-    return data;
-  } catch {
-    return null;
-  }
-}
-function writeCache(data) {
-  try {
-    sessionStorage.setItem(CACHE_KEY, JSON.stringify({ data, ts: Date.now() }));
-  } catch {}
-}
 
 // ── Sub-componentes ───────────────────────────────────────────────────────────
 const HomeButton = memo(function HomeButton({ theme, isDark, onClick }) {
@@ -675,18 +649,19 @@ const FullPlayer = memo(function FullPlayer({
 // ── COMPONENTE PRINCIPAL ──────────────────────────────────────────────────────
 function Reproductor() {
   const navigate = useNavigate();
-  const audioRef = useRef(null);
   const dragRef = useRef(false);
   const artSizeHome = useRef(getArtSize()).current;
+  const haptics = useHaptics();
 
-  const [songs, setSongs] = useState([]);
-  const [loading, setLoading] = useState(true);
+  // Consumimos el store global
+  const { 
+    songs, currentIdx, playing, volume, favorites, loading,
+    play: playStore, togglePlay: togglePlayStore, next: nextStore, prev: prevStore, setVolume, toggleFav, setSongs
+  } = useMusicStore();
+
   const [tab, setTab] = useState("home");
-  const [currentIdx, setCurrentIdx] = useState(null);
-  const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [volume, setVolume] = useState(0.8);
   const [showFull, setShowFull] = useState(false);
   const [search, setSearch] = useState("");
   const [uploading, setUploading] = useState(false);
@@ -698,99 +673,101 @@ function Reproductor() {
       return true;
     }
   });
-  const [favorites, setFavorites] = useState(() => {
-    try {
-      return JSON.parse(localStorage.getItem(LOCAL_KEY) ?? "[]");
-    } catch {
-      return [];
-    }
-  });
 
   const theme = isDark ? themes.dark : themes.light;
   const song = currentIdx !== null ? songs[currentIdx] : null;
   const isFavSong = song ? favorites.includes(song.id) : false;
   const showMini = song && tab !== "home";
 
-  // ── Carga canciones desde Firebase ───────────────────────────────────────
-  useEffect(() => {
-    (async () => {
-      const cached = readCache();
-      if (cached) {
-        setSongs(cached);
-        setLoading(false);
-        return;
-      }
-      const data = await fetchSongs();
-      writeCache(data);
-      setSongs(data);
-      setLoading(false);
-    })();
-  }, []);
+  // ── Handlers con Haptics ──────────────────────────────────────────────────
+  const handleTabChange = useCallback((t) => {
+    haptics.light();
+    setTab(t);
+  }, [haptics]);
 
-  // ── Audio controls ────────────────────────────────────────────────────────
   const play = useCallback((idx) => {
-    setCurrentIdx(idx);
-    setPlaying(true);
-  }, []);
+    haptics.light();
+    playStore(idx);
+  }, [haptics, playStore]);
 
   const togglePlay = useCallback(() => {
-    if (currentIdx === null) {
-      if (songs.length) play(0);
-      return;
-    }
-    setPlaying((p) => !p);
-  }, [currentIdx, songs.length, play]);
+    haptics.light();
+    togglePlayStore();
+  }, [haptics, togglePlayStore]);
 
   const next = useCallback(() => {
-    if (songs.length)
-      play(currentIdx !== null ? (currentIdx + 1) % songs.length : 0);
-  }, [currentIdx, songs.length, play]);
+    haptics.light();
+    nextStore();
+  }, [haptics, nextStore]);
+
   const prev = useCallback(() => {
-    if (songs.length)
-      play(
-        currentIdx !== null
-          ? (currentIdx - 1 + songs.length) % songs.length
-          : 0,
-      );
-  }, [currentIdx, songs.length, play]);
+    haptics.light();
+    prevStore();
+  }, [haptics, prevStore]);
+
+  const toggleFavSong = useCallback(() => {
+    if (song) {
+      if (!isFavSong) haptics.success();
+      else haptics.light();
+      toggleFav(song.id);
+    }
+  }, [song, isFavSong, haptics, toggleFav]);
+
+  // ── Sincronización con el audio global ──────────────────────────────────────
+  useEffect(() => {
+    const audioEl = document.querySelector("audio");
+    if (!audioEl) return;
+
+    const onTime = () => {
+      if (!dragRef.current) setCurrentTime(audioEl.currentTime);
+    };
+    const onMeta = () => {
+      setDuration(audioEl.duration || 0);
+    };
+
+    audioEl.addEventListener("timeupdate", onTime);
+    audioEl.addEventListener("loadedmetadata", onMeta);
+    if (audioEl.duration) setDuration(audioEl.duration);
+
+    return () => {
+      audioEl.removeEventListener("timeupdate", onTime);
+      audioEl.removeEventListener("loadedmetadata", onMeta);
+    };
+  }, [song]);
 
   const seek = useCallback((v) => {
-    if (audioRef.current) audioRef.current.currentTime = v;
+    const audioEl = document.querySelector("audio");
+    if (audioEl) audioEl.currentTime = v;
     setCurrentTime(v);
   }, []);
 
   const changeVolume = useCallback((e) => {
-    const v = Number(e.target.value);
-    setVolume(v);
-    if (audioRef.current) audioRef.current.volume = v;
-  }, []);
+    setVolume(Number(e.target.value));
+  }, [setVolume]);
 
-  const toggleFav = useCallback(
-    (id) =>
-      setFavorites((f) =>
-        f.includes(id) ? f.filter((x) => x !== id) : [...f, id],
-      ),
-    [],
-  );
-  const toggleFavSong = useCallback(() => {
-    if (song) toggleFav(song.id);
-  }, [song, toggleFav]);
-  const openFull = useCallback(() => setShowFull(true), []);
-  const closeFull = useCallback(() => setShowFull(false), []);
-  const toggleTheme = useCallback(() => setIsDark((d) => !d), []);
+  const openFull = useCallback(() => {
+    haptics.light();
+    setShowFull(true);
+  }, [haptics]);
+
+  const closeFull = useCallback(() => {
+    haptics.light();
+    setShowFull(false);
+  }, [haptics]);
+
+  const toggleTheme = useCallback(() => {
+    haptics.light();
+    setIsDark((d) => !d);
+  }, [haptics]);
+
   const handleSearch = useCallback((e) => setSearch(e.target.value), []);
   const handleBack = useCallback(
-    () => navigate("/", { replace: true }),
-    [navigate],
+    () => {
+      haptics.light();
+      navigate("/", { replace: true });
+    },
+    [navigate, haptics],
   );
-
-  const onTimeUpdate = useCallback((e) => {
-    if (!dragRef.current) setCurrentTime(e.currentTarget.currentTime);
-  }, []);
-  const onLoadedMeta = useCallback((e) => {
-    setDuration(e.currentTarget.duration || 0);
-    setCurrentTime(0);
-  }, []);
 
   // ── Upload handler ────────────────────────────────────────────────────────
   const handleUploadSong = useCallback(async () => {
@@ -837,10 +814,6 @@ function Reproductor() {
           Swal.showValidationMessage("Selecciona un archivo de audio");
           return false;
         }
-        if (audioInput.files[0].size > 50 * 1024 * 1024) {
-          Swal.showValidationMessage("El archivo de audio supera los 50 MB");
-          return false;
-        }
         return {
           title,
           artist,
@@ -853,7 +826,6 @@ function Reproductor() {
     if (!formData) return;
     setUploading(true);
 
-    // Swal de progreso
     Swal.fire({
       ...swalBase,
       title: "Subiendo canción…",
@@ -873,9 +845,7 @@ function Reproductor() {
         if (fill) fill.style.width = `${p}%`;
         if (text) text.textContent = `${p}%`;
       });
-      const updated = [...songs, newSong];
-      writeCache(updated);
-      setSongs(updated);
+      setSongs([...songs, newSong]);
       Swal.fire({
         ...swalBase,
         title: "¡Canción agregada! 🎵",
@@ -884,17 +854,11 @@ function Reproductor() {
         showConfirmButton: false,
       });
     } catch (err) {
-      Swal.fire({
-        ...swalBase,
-        title: "Error al subir",
-        text: err.message,
-        icon: "error",
-        confirmButtonText: "Entendido",
-      });
+      Swal.fire({ ...swalBase, title: "Error al subir", text: err.message, icon: "error" });
     } finally {
       setUploading(false);
     }
-  }, [songs]);
+  }, [songs, setSongs]);
 
   const handleEditSong = useCallback(
     async (s) => {
@@ -915,214 +879,84 @@ function Reproductor() {
           <label style="font-size:11px;font-weight:600;color:#6b5a4e;display:block;margin-bottom:3px">Nueva portada (opcional)</label>
           <input id="swal-cover" type="file" accept="image/*" class="swal2-input" style="margin:0;width:100%;box-sizing:border-box;padding:6px;height:auto" />
         </div>
-        ${s.cover ? `<img src="${s.cover}" style="width:60px;height:60px;border-radius:50%;object-fit:cover;align-self:center;border:2px solid #6b5a4e" />` : ""}
       </div>`,
         showCancelButton: true,
         confirmButtonText: "Guardar",
-        cancelButtonText: "Cancelar",
-        focusConfirm: false,
-        preConfirm: () => {
-          const title = document.getElementById("swal-title").value.trim();
-          const artist = document.getElementById("swal-artist").value.trim();
-          const cover = document.getElementById("swal-cover").files[0] ?? null;
-          if (!title) {
-            Swal.showValidationMessage("El título es requerido");
-            return false;
-          }
-          if (!artist) {
-            Swal.showValidationMessage("El artista es requerido");
-            return false;
-          }
-          return { title, artist, coverFile: cover };
-        },
+        preConfirm: () => ({
+          title: document.getElementById("swal-title").value.trim(),
+          artist: document.getElementById("swal-artist").value.trim(),
+          coverFile: document.getElementById("swal-cover").files[0] ?? null,
+        }),
       });
 
       if (!formData) return;
-
-      Swal.fire({
-        ...swalBase,
-        title: "Guardando cambios…",
-        html: `<div style="height:6px;border-radius:999px;background:#d8cfc5;overflow:hidden">
-             <div id="swal-up-fill" style="height:100%;width:0%;background:#6b5a4e;border-radius:999px;transition:width .2s"></div>
-           </div>`,
-        allowOutsideClick: false,
-        showConfirmButton: false,
-      });
 
       try {
         const updated = await updateSong(s, formData, (p) => {
           const fill = document.getElementById("swal-up-fill");
           if (fill) fill.style.width = `${p}%`;
         });
-        const updatedList = songs.map((x) => (x.id === s.id ? updated : x));
-        writeCache(updatedList);
-        setSongs(updatedList);
-        Swal.fire({
-          ...swalBase,
-          title: "¡Canción actualizada! ✏️",
-          icon: "success",
-          timer: 1600,
-          showConfirmButton: false,
-        });
+        setSongs(songs.map((x) => (x.id === s.id ? updated : x)));
+        Swal.fire({ ...swalBase, title: "¡Actualizada! ✏️", icon: "success", timer: 1600, showConfirmButton: false });
       } catch (err) {
-        Swal.fire({
-          ...swalBase,
-          title: "Error al guardar",
-          text: err.message,
-          icon: "error",
-          confirmButtonText: "Entendido",
-        });
+        Swal.fire({ ...swalBase, title: "Error al guardar", text: err.message, icon: "error" });
       }
     },
-    [songs],
+    [songs, setSongs],
   );
 
-  // ── Delete handler ────────────────────────────────────────────────────────
   const handleDeleteSong = useCallback(
     async (s) => {
       const res = await Swal.fire({
         ...swalBase,
         title: `¿Eliminar "${s.title}"?`,
-        text: "Se borrará permanentemente de Firebase.",
         icon: "warning",
         showCancelButton: true,
         confirmButtonText: "Sí, eliminar",
-        cancelButtonText: "Cancelar",
       });
       if (!res.isConfirmed) return;
       await deleteSong(s.id, s.audioPath, s.coverPath);
-      const updated = songs.filter((x) => x.id !== s.id);
-      writeCache(updated);
-      setSongs(updated);
-      if (song?.id === s.id) {
-        setCurrentIdx(null);
-        setPlaying(false);
-      }
+      setSongs(songs.filter((x) => x.id !== s.id));
     },
-    [songs, song],
+    [songs, setSongs],
   );
 
-  // ── Efectos ───────────────────────────────────────────────────────────────
   useEffect(() => {
-    try {
-      localStorage.setItem(THEME_KEY, JSON.stringify(isDark));
-    } catch {}
+    localStorage.setItem(THEME_KEY, JSON.stringify(isDark));
   }, [isDark]);
-  useEffect(() => {
-    try {
-      localStorage.setItem(LOCAL_KEY, JSON.stringify(favorites));
-    } catch {}
-  }, [favorites]);
+
   useEffect(() => {
     setSearch("");
   }, [tab]);
 
   useEffect(() => {
-    const a = audioRef.current;
-    if (!a || currentIdx === null) return;
-    a.load();
-    if (playing) a.play().catch(() => setPlaying(false));
-  }, [currentIdx]); // eslint-disable-line
-
-  useEffect(() => {
-    const a = audioRef.current;
-    if (!a) return;
-    if (playing) a.play().catch(() => setPlaying(false));
-    else a.pause();
-  }, [playing]);
-
-  useEffect(() => {
-    if (audioRef.current) audioRef.current.volume = volume;
-  }, [volume]);
-
-  useEffect(() => {
     const onKey = (e) => {
       if (document.activeElement?.tagName === "INPUT") return;
       switch (e.code) {
-        case "Space":
-          e.preventDefault();
-          togglePlay();
-          break;
-        case "ArrowRight":
-          e.preventDefault();
-          next();
-          break;
-        case "ArrowLeft":
-          e.preventDefault();
-          prev();
-          break;
-        case "ArrowUp":
-          e.preventDefault();
-          setVolume((v) => {
-            const n = Math.min(1, v + 0.05);
-            if (audioRef.current) audioRef.current.volume = n;
-            return n;
-          });
-          break;
-        case "ArrowDown":
-          e.preventDefault();
-          setVolume((v) => {
-            const n = Math.max(0, v - 0.05);
-            if (audioRef.current) audioRef.current.volume = n;
-            return n;
-          });
-          break;
-        case "KeyF":
-          if (song) toggleFav(song.id);
-          break;
-        case "Escape":
-          setShowFull(false);
-          break;
-        case "KeyM":
-          setVolume((v) => {
-            const n = v > 0 ? 0 : 0.8;
-            if (audioRef.current) audioRef.current.volume = n;
-            return n;
-          });
-          break;
-        case "Digit1":
-          setTab("home");
-          break;
-        case "Digit2":
-          setTab("library");
-          break;
-        case "Digit3":
-          setTab("favorites");
-          break;
+        case "Space": e.preventDefault(); togglePlay(); break;
+        case "ArrowRight": e.preventDefault(); next(); break;
+        case "ArrowLeft": e.preventDefault(); prev(); break;
+        case "KeyF": if (song) toggleFav(song.id); break;
+        case "Escape": setShowFull(false); break;
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [togglePlay, next, prev, song, toggleFav]);
 
-  // ── Datos derivados ───────────────────────────────────────────────────────
   const filteredSongs = useMemo(() => {
     if (!search.trim()) return songs;
     const q = search.toLowerCase();
-    return songs.filter(
-      (s) =>
-        s.title.toLowerCase().includes(q) || s.artist.toLowerCase().includes(q),
-    );
+    return songs.filter(s => s.title.toLowerCase().includes(q) || s.artist.toLowerCase().includes(q));
   }, [search, songs]);
 
-  const favSongs = useMemo(
-    () => songs.filter((s) => favorites.includes(s.id)),
-    [favorites, songs],
-  );
+  const favSongs = useMemo(() => songs.filter((s) => favorites.includes(s.id)), [favorites, songs]);
 
   const renderSongList = useCallback(
     (list, emptyIcon, emptyMsg, showActions = false) => (
-      <div
-        className="overflow-y-auto"
-        style={{ maxHeight: "min(380px, 56vh)" }}
-      >
+      <div className="overflow-y-auto" style={{ maxHeight: "min(380px, 56vh)" }}>
         {list.length === 0 ? (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="flex flex-col items-center justify-center py-10 gap-3"
-            style={{ color: theme.muted }}
-          >
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="flex flex-col items-center justify-center py-10 gap-3" style={{ color: theme.muted }}>
             {emptyIcon}
             <p className="text-sm text-center">{emptyMsg}</p>
           </motion.div>
@@ -1144,272 +978,65 @@ function Reproductor() {
         )}
       </div>
     ),
-    [
-      song,
-      playing,
-      favorites,
-      songs,
-      play,
-      toggleFav,
-      handleEditSong,
-      handleDeleteSong,
-      theme,
-    ],
+    [song, playing, favorites, songs, play, toggleFav, handleEditSong, handleDeleteSong, theme],
   );
 
-  if (loading) return <Carga />;
+  if (loading && songs.length === 0) return <Carga />;
 
   return (
-    <div
-      className="min-h-dvh flex flex-col transition-colors duration-300"
-      style={{ backgroundColor: theme.bg, color: theme.text }}
-    >
+    <div className="min-h-dvh flex flex-col transition-colors duration-300" style={{ backgroundColor: theme.bg, color: theme.text }}>
       <HomeButton theme={theme} isDark={isDark} onClick={handleBack} />
 
-      <main
-        className="flex-1 overflow-y-auto"
-        style={{
-          paddingBottom:
-            tab === "home" ? "4rem" : showMini ? "8.5rem" : "4.5rem",
-        }}
-      >
+      <main className="flex-1 overflow-y-auto" style={{ paddingBottom: tab === "home" ? "4rem" : showMini ? "8.5rem" : "4.5rem" }}>
         <div className="max-w-lg mx-auto w-full">
-          {/* ── HOME ── */}
           {tab === "home" && (
             <div className="min-h-[calc(100dvh-4rem)] flex items-center justify-center p-3 sm:p-4">
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4 }}
                 className="w-full max-w-sm rounded-3xl flex flex-col items-center"
-                style={{
-                  padding: "clamp(1rem, 4vw, 1.5rem)",
-                  gap: "clamp(0.75rem, 3vw, 1.25rem)",
-                  backgroundColor: isDark ? theme.surface : theme.card,
-                  border: `1px solid ${theme.border}`,
-                  boxShadow: isDark
-                    ? "0 8px 40px rgba(0,0,0,0.45)"
-                    : "0 8px 40px rgba(90,60,40,0.12)",
-                }}
+                style={{ padding: "clamp(1rem, 4vw, 1.5rem)", gap: "clamp(0.75rem, 3vw, 1.25rem)", backgroundColor: isDark ? theme.surface : theme.card, border: `1px solid ${theme.border}`, boxShadow: isDark ? "0 8px 40px rgba(0,0,0,0.45)" : "0 8px 40px rgba(90,60,40,0.12)" }}
               >
                 <div className="w-full flex justify-end">
-                  <motion.button
-                    whileTap={{ scale: 0.9 }}
-                    onClick={toggleTheme}
-                    className="w-9 h-9 rounded-full flex items-center justify-center border-none cursor-pointer"
-                    style={{ backgroundColor: theme.border }}
-                  >
-                    {isDark ? (
-                      <RiSunLine size={18} style={{ color: theme.light }} />
-                    ) : (
-                      <RiMoonLine size={18} style={{ color: theme.light }} />
-                    )}
+                  <motion.button whileTap={{ scale: 0.9 }} onClick={toggleTheme} className="w-9 h-9 rounded-full flex items-center justify-center border-none cursor-pointer" style={{ backgroundColor: theme.border }}>
+                    {isDark ? <RiSunLine size={18} style={{ color: theme.light }} /> : <RiMoonLine size={18} style={{ color: theme.light }} />}
                   </motion.button>
                 </div>
-
-                <AlbumArt
-                  song={song ?? songs[0] ?? null}
-                  size={artSizeHome}
-                  playing={playing}
-                  theme={theme}
-                />
-
+                <AlbumArt song={song ?? songs[0] ?? null} size={artSizeHome} playing={playing} theme={theme} />
                 <div className="w-full text-center">
-                  <h1
-                    className="font-semibold mb-1 leading-snug"
-                    style={{
-                      color: theme.text,
-                      fontSize: "clamp(0.85rem, 4vw, 1.1rem)",
-                    }}
-                  >
-                    {getGreeting()}
-                  </h1>
-                  <p
-                    className="text-xs uppercase tracking-widest mt-2 mb-1"
-                    style={{ color: theme.muted }}
-                  >
-                    {song
-                      ? "Reproduciendo ahora"
-                      : songs.length
-                        ? "Sin reproducción"
-                        : "Sin canciones"}
-                  </p>
-                  <h2
-                    className="font-bold truncate"
-                    style={{
-                      color: theme.text,
-                      fontSize: "clamp(0.95rem, 4.5vw, 1.15rem)",
-                    }}
-                  >
-                    {(song ?? songs[0])?.title ?? "—"}
-                  </h2>
-                  <p
-                    className="text-sm truncate"
-                    style={{ color: theme.muted }}
-                  >
-                    {(song ?? songs[0])?.artist ?? ""}
-                  </p>
+                  <h1 className="font-semibold mb-1 leading-snug" style={{ color: theme.text, fontSize: "clamp(0.85rem, 4vw, 1.1rem)" }}>{getGreeting()}</h1>
+                  <h2 className="font-bold truncate" style={{ color: theme.text, fontSize: "clamp(0.95rem, 4.5vw, 1.15rem)" }}>{(song ?? songs[0])?.title ?? "—"}</h2>
+                  <p className="text-sm truncate" style={{ color: theme.muted }}>{(song ?? songs[0])?.artist ?? ""}</p>
                 </div>
-
-                {song && (
-                  <div className="w-full">
-                    <ProgressBar
-                      currentTime={currentTime}
-                      duration={duration}
-                      onSeek={seek}
-                      dragRef={dragRef}
-                      theme={theme}
-                    />
-                  </div>
-                )}
-
+                {song && <ProgressBar currentTime={currentTime} duration={duration} onSeek={seek} dragRef={dragRef} theme={theme} />}
                 <div className="flex items-center justify-between w-full">
-                  <motion.button
-                    whileTap={{ scale: 0.9 }}
-                    type="button"
-                    onClick={prev}
-                    className="rounded-full flex items-center justify-center border-none cursor-pointer"
-                    style={{
-                      width: "clamp(2.5rem,12vw,3.25rem)",
-                      height: "clamp(2.5rem,12vw,3.25rem)",
-                      backgroundColor: theme.border,
-                      color: theme.text,
-                    }}
-                  >
-                    <RiSkipBackFill size={20} />
-                  </motion.button>
-                  <motion.button
-                    whileTap={{ scale: 0.95 }}
-                    type="button"
-                    onClick={togglePlay}
-                    className="rounded-full flex items-center justify-center border-none cursor-pointer"
-                    style={{
-                      width: "clamp(3rem,14vw,3.75rem)",
-                      height: "clamp(3rem,14vw,3.75rem)",
-                      backgroundColor: theme.light,
-                      color: theme.bg,
-                      boxShadow: `0 6px 24px ${theme.accent}55`,
-                    }}
-                  >
-                    {playing ? (
-                      <RiPauseFill size={28} />
-                    ) : (
-                      <RiPlayFill size={28} />
-                    )}
-                  </motion.button>
-                  <motion.button
-                    whileTap={{ scale: 0.9 }}
-                    type="button"
-                    onClick={next}
-                    className="rounded-full flex items-center justify-center border-none cursor-pointer"
-                    style={{
-                      width: "clamp(2.5rem,12vw,3.25rem)",
-                      height: "clamp(2.5rem,12vw,3.25rem)",
-                      backgroundColor: theme.border,
-                      color: theme.text,
-                    }}
-                  >
-                    <RiSkipForwardFill size={20} />
-                  </motion.button>
+                  <motion.button whileTap={{ scale: 0.9 }} onClick={prev} className="rounded-full flex items-center justify-center border-none cursor-pointer" style={{ width: "clamp(2.5rem,12vw,3.25rem)", height: "clamp(2.5rem,12vw,3.25rem)", backgroundColor: theme.border, color: theme.text }}><RiSkipBackFill size={20} /></motion.button>
+                  <motion.button whileTap={{ scale: 0.95 }} onClick={togglePlay} className="rounded-full flex items-center justify-center border-none cursor-pointer" style={{ width: "clamp(3rem,14vw,3.75rem)", height: "clamp(3rem,14vw,3.75rem)", backgroundColor: theme.light, color: theme.bg, boxShadow: `0 6px 24px ${theme.accent}55` }}>{playing ? <RiPauseFill size={28} /> : <RiPlayFill size={28} />}</motion.button>
+                  <motion.button whileTap={{ scale: 0.9 }} onClick={next} className="rounded-full flex items-center justify-center border-none cursor-pointer" style={{ width: "clamp(2.5rem,12vw,3.25rem)", height: "clamp(2.5rem,12vw,3.25rem)", backgroundColor: theme.border, color: theme.text }}><RiSkipForwardFill size={20} /></motion.button>
                 </div>
-
-                <VolumeSlider
-                  volume={volume}
-                  onChange={changeVolume}
-                  theme={theme}
-                />
-
-                <motion.button
-                  whileTap={{ scale: 0.98 }}
-                  type="button"
-                  onClick={toggleFavSong}
-                  className="w-full py-2 rounded-2xl flex items-center justify-center gap-2 text-sm font-semibold transition-all duration-200 border-none"
-                  style={{
-                    backgroundColor: isFavSong
-                      ? theme.favActiveBg
-                      : theme.favInactiveBg,
-                    outline: `1.5px solid ${isFavSong ? theme.favActiveBg : theme.favInactiveBorder}`,
-                    color: isFavSong
-                      ? theme.favActiveText
-                      : theme.favInactiveText,
-                    cursor: song ? "pointer" : "not-allowed",
-                    opacity: song ? 1 : 0.4,
-                  }}
-                >
-                  {isFavSong ? (
-                    <>
-                      <RiHeart3Fill size={14} /> En Favoritos
-                    </>
-                  ) : (
-                    <>
-                      <RiHeart3Line size={14} /> Agregar a Favoritos
-                    </>
-                  )}
-                </motion.button>
+                <VolumeSlider volume={volume} onChange={changeVolume} theme={theme} />
+                <motion.button whileTap={{ scale: 0.98 }} onClick={toggleFavSong} className="w-full py-2 rounded-2xl flex items-center justify-center gap-2 text-sm font-semibold transition-all duration-200 border-none" style={{ backgroundColor: isFavSong ? theme.favActiveBg : theme.favInactiveBg, outline: `1.5px solid ${isFavSong ? theme.favActiveBg : theme.favInactiveBorder}`, color: isFavSong ? theme.favActiveText : theme.favInactiveText, cursor: song ? "pointer" : "not-allowed", opacity: song ? 1 : 0.4 }}>{isFavSong ? <><RiHeart3Fill size={14} /> En Favoritos</> : <><RiHeart3Line size={14} /> Agregar a Favoritos</>}</motion.button>
               </motion.div>
             </div>
           )}
 
-          {/* ── BIBLIOTECA ── */}
           {tab === "library" && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="p-4 pt-16"
-            >
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="p-4 pt-16">
               <div className="flex items-center justify-between mb-0.5">
-                <h1
-                  className="text-3xl font-bold"
-                  style={{ color: theme.text }}
-                >
-                  Biblioteca
-                </h1>
-                <motion.button
-                  whileTap={{ scale: 0.92 }}
-                  onClick={handleUploadSong}
-                  disabled={uploading}
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border-none cursor-pointer transition disabled:opacity-50"
-                  style={{ backgroundColor: theme.accent, color: theme.light }}
-                >
-                  <RiAddLine size={16} />
-                  {uploading ? "Subiendo…" : "Agregar"}
-                </motion.button>
+                <h1 className="text-3xl font-bold" style={{ color: theme.text }}>Biblioteca</h1>
+                <motion.button whileTap={{ scale: 0.92 }} onClick={handleUploadSong} disabled={uploading} className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold border-none cursor-pointer transition disabled:opacity-50" style={{ backgroundColor: theme.accent, color: theme.light }}><RiAddLine size={16} />{uploading ? "Subiendo…" : "Agregar"}</motion.button>
               </div>
-              <p className="text-sm mb-4" style={{ color: theme.muted }}>
-                {songs.length} canciones
-              </p>
+              <p className="text-sm mb-4" style={{ color: theme.muted }}>{songs.length} canciones</p>
               <SearchBar value={search} onChange={handleSearch} theme={theme} />
-              {renderSongList(
-                filteredSongs,
-                <RiSearch2Line size={42} style={{ color: theme.border }} />,
-                `Sin resultados para "${search}"`,
-                true, // ← habilita botones ✏️ y 🗑 en cada fila
-              )}
+              {renderSongList(filteredSongs, <RiSearch2Line size={42} style={{ color: theme.border }} />, `Sin resultados para "${search}"`, true)}
             </motion.div>
           )}
 
-          {/* ── FAVORITOS ── */}
           {tab === "favorites" && (
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              className="p-4 pt-16"
-            >
-              <h1
-                className="text-3xl font-bold mb-0.5"
-                style={{ color: theme.text }}
-              >
-                Favoritos
-              </h1>
-              <p className="text-sm mb-4" style={{ color: theme.muted }}>
-                {favSongs.length} canción{favSongs.length !== 1 ? "es" : ""}
-              </p>
-              {renderSongList(
-                favSongs,
-                <RiHeart3Line size={48} style={{ color: theme.border }} />,
-                "Toca el ♥ en cualquier canción para verla aquí",
-                false, // ← sin botones de editar/eliminar en favoritos
-              )}
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="p-4 pt-16">
+              <h1 className="text-3xl font-bold mb-0.5" style={{ color: theme.text }}>Favoritos</h1>
+              <p className="text-sm mb-4" style={{ color: theme.muted }}>{favSongs.length} canciones</p>
+              {renderSongList(favSongs, <RiHeart3Line size={48} style={{ color: theme.border }} />, "Toca el ♥ en cualquier canción para verla aquí", false)}
             </motion.div>
           )}
         </div>
@@ -1417,14 +1044,7 @@ function Reproductor() {
 
       <AnimatePresence>
         {showMini && (
-          <MiniPlayer
-            song={song}
-            playing={playing}
-            theme={theme}
-            isDark={isDark}
-            onOpen={openFull}
-            onToggle={togglePlay}
-          />
+          <MiniPlayer song={song} playing={playing} theme={theme} isDark={isDark} onOpen={openFull} onToggle={togglePlay} />
         )}
       </AnimatePresence>
 
@@ -1432,34 +1052,9 @@ function Reproductor() {
 
       <AnimatePresence>
         {showFull && (
-          <FullPlayer
-            song={song}
-            playing={playing}
-            currentTime={currentTime}
-            duration={duration}
-            isFav={isFavSong}
-            volume={volume}
-            dragRef={dragRef}
-            theme={theme}
-            isDark={isDark}
-            onVolumeChange={changeVolume}
-            onSeek={seek}
-            onPrev={prev}
-            onNext={next}
-            onToggle={togglePlay}
-            onToggleFav={toggleFavSong}
-            onClose={closeFull}
-          />
+          <FullPlayer song={song} playing={playing} currentTime={currentTime} duration={duration} isFav={isFavSong} volume={volume} dragRef={dragRef} theme={theme} isDark={isDark} onVolumeChange={changeVolume} onSeek={seek} onPrev={prev} onNext={next} onToggle={togglePlay} onToggleFav={toggleFavSong} onClose={closeFull} />
         )}
       </AnimatePresence>
-
-      <audio
-        ref={audioRef}
-        src={song?.src}
-        onTimeUpdate={onTimeUpdate}
-        onLoadedMetadata={onLoadedMeta}
-        onEnded={next}
-      />
     </div>
   );
 }

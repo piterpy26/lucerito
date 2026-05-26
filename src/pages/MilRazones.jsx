@@ -3,6 +3,7 @@ import { razones } from "../data/razones";
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { useHaptics } from "../hooks/useHaptics";
 
 const FILTERS = [
   { key: "contenido", label: "Texto" },
@@ -54,6 +55,7 @@ const MilRazones = () => {
 
   const scrollRef = useRef(null);
   const cols      = useColumnCount();
+  const haptics   = useHaptics();
 
   useEffect(() => {
     if (!selected) return;
@@ -91,8 +93,21 @@ const MilRazones = () => {
   });
 
   const handleQuery  = useCallback((e) => setQuery(e.target.value), []);
-  const handleFilter = useCallback((k) => { setFilter(k); setQuery(""); }, []);
-  const handleClear  = useCallback(() => { setQuery(""); setFilter("contenido"); }, []);
+  const handleFilter = useCallback((k) => { 
+    haptics.light();
+    setFilter(k); 
+    setQuery(""); 
+  }, [haptics]);
+  const handleClear  = useCallback(() => { 
+    haptics.light();
+    setQuery(""); 
+    setFilter("contenido"); 
+  }, [haptics]);
+
+  const handleSelect = useCallback((r) => {
+    haptics.light();
+    setSelected(r);
+  }, [haptics]);
 
   const hasFilter = query.trim() !== "" || filter !== "contenido";
 
